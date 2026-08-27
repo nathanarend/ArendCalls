@@ -4,6 +4,9 @@ import (
 	"sync"
 
 	"wacalls/internal/voip/call"
+	"wacalls/internal/voip/wanode"
+
+	"go.mau.fi/whatsmeow/types"
 )
 
 type activeCall struct {
@@ -31,6 +34,20 @@ func (r *callRegistry) get(callID string) (*activeCall, bool) {
 	defer r.mu.Unlock()
 	ac, ok := r.calls[callID]
 	return ac, ok
+}
+
+func (r *callRegistry) getByPeer(peer types.JID) (*activeCall, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	peerStr := peer.ToNonAD().String()
+	for _, ac := range r.calls {
+		if c := ac.cm.CurrentCall(); c != nil {
+			if wanode.MustJID(c.PeerJid).ToNonAD().String() == peerStr {
+				return ac, true
+			}
+		}
+	}
+	return nil, false
 }
 
 func (r *callRegistry) remove(callID string) (*activeCall, bool) {

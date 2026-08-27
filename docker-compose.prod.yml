@@ -1,0 +1,37 @@
+version: '3.8'
+
+services:
+  wacalls:
+    image: nathanarend/arendcalls:latest
+    container_name: arendcalls_server
+    restart: unless-stopped
+    network_mode: "host"
+    environment:
+      - API_KEY=sua_chave_mestra_aqui
+    volumes:
+      - wacalls_data:/app/data
+    expose:
+      - "8080"
+    ports:
+      - "50000-50100:50000-50100/udp"
+    networks:
+      - network_public
+    deploy:
+      labels:
+        - traefik.enable=true
+        - traefik.docker.network=network_public
+        - traefik.http.routers.wacalls.rule=Host(`call.seudominio.com`)
+        - traefik.http.routers.wacalls.entrypoints=websecure
+        - traefik.http.routers.wacalls.tls.certresolver=letsencryptresolver
+        - traefik.http.routers.wacalls.middlewares=wacalls-auth
+        - traefik.http.middlewares.wacalls-auth.basicauth.users=admin:$$apr1$$exemplo$$hash_gerado_aqui
+        - traefik.http.services.wacalls.loadbalancer.server.port=8080
+        - traefik.http.services.wacalls.loadbalancer.passHostHeader=true
+
+volumes:
+  wacalls_data:
+    driver: local
+
+networks:
+  network_public:
+    external: true

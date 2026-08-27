@@ -56,9 +56,18 @@ export const IncomingCallModal = () => {
   const busy = accept.isPending || reject.isPending;
 
   useEffect(() => {
-    if (!incoming) return;
+    if (!incoming) {
+      document.title = "ArendCalls";
+      return;
+    }
+    
+    document.title = "Recebendo chamada...";
     const ring = startRingLoop();
-    return () => ring?.stop();
+    
+    return () => {
+      ring?.stop();
+      document.title = "ArendCalls";
+    };
   }, [incoming]);
 
   return (
@@ -74,8 +83,8 @@ export const IncomingCallModal = () => {
           <div className="mb-2 flex h-14 w-14 items-center justify-center rounded-full bg-primary/10 text-primary">
             <PhoneIncoming className="h-7 w-7" />
           </div>
-          <DialogTitle>Incoming call</DialogTitle>
-          <DialogDescription className="truncate">{incoming?.peer}</DialogDescription>
+          <DialogTitle className="text-xl">Chamada Recebida</DialogTitle>
+          <DialogDescription className="truncate">{incoming?.peerName || incoming?.peer}</DialogDescription>
         </DialogHeader>
         <div className="mt-2 flex items-center justify-center gap-6">
           <Button

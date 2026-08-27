@@ -22,3 +22,6 @@ export const rejectCall = async (sid: string, callId: string): Promise<void> => 
 
 export const endCall = (sid: string, callId: string) =>
   apiDelete(`/api/sessions/${sid}/calls/${callId}`);
+
+export const setHoldCall = (sid: string, callId: string, hold: boolean) =>
+  apiPost(`/api/sessions/${sid}/calls/${callId}/${hold ? "hold" : "unhold"}`, { mode: "hold" });

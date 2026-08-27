@@ -11,6 +11,7 @@ import { EmptyState } from "@/components/shared/EmptyState";
 import { ensureSessionsWired, useSessions } from "@/stores/sessions";
 import { ensureCallsWired } from "@/stores/calls";
 import { useTheme } from "@/stores/theme";
+import { ApiDocs } from "@/components/domain/api/ApiDocs";
 
 export const App = () => {
   const sessions = useSessions((s) => s.sessions);
@@ -27,11 +28,13 @@ export const App = () => {
   return (
     <TooltipProvider delayDuration={200}>
       <AppShell>
-        {sessions.length === 0 ? (
+        {activeId === "api-docs" ? (
+          <ApiDocs />
+        ) : sessions.length === 0 ? (
           <EmptyState
             icon={<PlusCircle className="h-6 w-6" />}
-            title="No accounts yet"
-            description="Create your first WhatsApp account from the sidebar to start calling."
+            title="Nenhuma conta ainda"
+            description="Crie sua primeira conta do WhatsApp no menu lateral para começar a ligar."
           />
         ) : active ? (
           <div className="space-y-6">
@@ -39,7 +42,7 @@ export const App = () => {
             {active.paired ? <CallsPage sid={active.id} /> : <SessionPairing session={active} />}
           </div>
         ) : (
-          <EmptyState title="Select an account" description="Choose an account from the sidebar." />
+          <EmptyState title="Selecione uma conta" description="Escolha uma conta no menu lateral." />
         )}
       </AppShell>
       <IncomingCallModal />

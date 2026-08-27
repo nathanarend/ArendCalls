@@ -4,7 +4,7 @@ import { useAudioDevices } from "@/hooks/useAudioDevices";
 import { useDevices } from "@/stores/devices";
 
 const selectClass = cn(
-  "h-9 rounded-md border border-input bg-transparent px-2 text-sm shadow-sm",
+  "h-9 rounded-md border border-input bg-background text-foreground px-2 text-sm shadow-sm",
   "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
 );
 
@@ -20,9 +20,9 @@ export const DeviceSelector = () => {
       <div className="inline-flex items-center gap-2">
         <Mic className="h-4 w-4 text-muted-foreground" />
         <select value={micId ?? ""} onChange={(e) => setMic(e.target.value)} className={selectClass}>
-          <option value="">Default mic</option>
+          <option value="" className="bg-background text-foreground">Microfone padrão</option>
           {mics.map((d) => (
-            <option key={d.deviceId} value={d.deviceId}>
+            <option key={d.deviceId} value={d.deviceId} className="bg-background text-foreground">
               {d.label}
             </option>
           ))}
@@ -31,9 +31,9 @@ export const DeviceSelector = () => {
       <div className="inline-flex items-center gap-2">
         <Volume2 className="h-4 w-4 text-muted-foreground" />
         <select value={outId ?? ""} onChange={(e) => setOut(e.target.value)} className={selectClass}>
-          <option value="">Default speaker</option>
+          <option value="" className="bg-background text-foreground">Alto-falante padrão</option>
           {outs.map((d) => (
-            <option key={d.deviceId} value={d.deviceId}>
+            <option key={d.deviceId} value={d.deviceId} className="bg-background text-foreground">
               {d.label}
             </option>
           ))}

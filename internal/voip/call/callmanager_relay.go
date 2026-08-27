@@ -83,6 +83,11 @@ func (m *CallManager) cleanupMedia() {
 		close(m.keepaliveStop)
 		m.keepaliveStop = nil
 	}
+	if m.holdStop != nil {
+		close(m.holdStop)
+		m.holdStop = nil
+	}
+	m.isHold = false
 	m.rtpSession = nil
 	m.srtpSession = nil
 	m.firstPacketSent = false

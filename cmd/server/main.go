@@ -14,23 +14,28 @@ import (
 
 func main() {
 	addr := flag.String("addr", ":8080", "HTTP listen address")
-	dbPath := flag.String("db", "wacalls.db", "SQLite session database path")
-	staticDir := flag.String("static", "client/dist", "static client directory (optional)")
-	debug := flag.Bool("debug", false, "verbose logging")
-	maxCalls := flag.Int("max-calls-per-session", 8, "max concurrent calls per session (0 = unlimited)")
+	dbPath := flag.String("db", "wacalls.db", "SQLite database path")
+	staticDir := flag.String("static", "", "Directory for static files (e.g. client/dist)")
+	debug := flag.Bool("debug", false, "Enable debug logging")
+	maxCalls := flag.Int("max-calls", 0, "Max concurrent calls per session (0 = unlimited)")
+	apiKeyFlag := flag.String("apikey", "", "Global API Key for admin access (overrides API_KEY env var)")
 	flag.Parse()
 
-	level := slog.LevelInfo
+	logLevel := slog.LevelInfo
 	if *debug {
-		level = slog.LevelDebug
+		logLevel = slog.LevelDebug
 	}
-	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level}))
-	slog.SetDefault(log)
+	log := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: logLevel}))
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
+	apiKey := *apiKeyFlag
+	if apiKey == "" {
+		apiKey = os.Getenv("API_KEY")
+	}
 
-	srv, err := newServer(ctx, *dbPath, *staticDir, *maxCalls, log)
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+
+	srv, err := newServer(ctx, *dbPath, *staticDir, apiKey, *maxCalls, log)
 	if err != nil {
 		log.Error("startup failed", "err", err)
 		os.Exit(1)

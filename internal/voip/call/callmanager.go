@@ -41,6 +41,8 @@ type CallManager struct {
 
 	lastCaptureAt time.Time
 	keepaliveStop chan struct{}
+	isHold        bool
+	holdStop      chan struct{}
 
 	OnStateChange func(*CallInfo)
 	OnIncoming    func(*CallInfo)
@@ -105,6 +107,7 @@ func (m *CallManager) StartCall(ctx context.Context, callID string, peerJid type
 	m.rtpSession = media.NewWhatsAppOpusSession(m.selfSsrc)
 	m.peerSsrcs = []uint32{media.GenerateSecureSsrc(callID, resolved.String(), 0)}
 	m.initCodec()
+	m.emitState()
 	m.mu.Unlock()
 
 	offer, err := signaling.BuildOfferStanza(ctx, m.sock, callID, callKey, resolved, isVideo)

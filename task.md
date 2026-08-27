@@ -1,0 +1,27 @@
+# Tarefas
+
+- [x] Baixar e extrair código-fonte do WaCalls (v1.0.0).
+- [x] Instalar o Go v1.26 localmente e dependências.
+- [x] Construir aplicação cliente (React) e rodar servidor Go localmente.
+- [x] Backend: Adicionar suporte para renomear conta.
+- [x] Frontend: Traduzir interface para pt-BR.
+- [x] Frontend: Adicionar documentação da API.
+- [x] Frontend: Fluxo para adicionar e renomear conta na Sidebar.
+- [x] Backend: Remover API Key por conta e manter autenticação unificada via Super-User `API_KEY` (global) e Admin Cookie.
+- [x] Backend: Criar e executar suíte de testes HTTP da API (`cmd/server/httpapi_test.go`).
+- [x] Backend: Preservar instâncias desconectadas/sem chave no banco de dados (`SessionManager.Restore`), mantendo-as em estado `logged_out` para preservar a referência de integração.
+- [x] Backend: Testar reinicialização do servidor e validar a preservação das instâncias cadastradas.
+- [x] Frontend: Atualizar UI e documentação da API para refletir a remoção da API Key por conta e foco na Super-User API Key.
+- [x] Frontend: Validar build de produção do React (`npm run build`).
+- [x] Documentação: Sincronizar README.md e ApiDocs.tsx com todas as rotas e regras de autenticação.
+- [x] Backend/Broker: Ajustar máquina de estados para manter `starting` ("Ligando...") após o envio da oferta (`TransitionOfferSent`) e evoluir para `ringing` ("Chamando...") apenas após a confirmação de recebimento/toque (`TransitionRingingReceived` / recibo `ringer` ou `delivered`).
+- [x] Testes: Validar suíte completa de testes unitários do VoIP e HTTP (`go test -v ./...`).
+- [x] Docker: Gerar imagem Docker `nathanarend/arendcalls:v2026.10` e `latest` e publicar no DockerHub.
+- [x] Servidor: Servidor local iniciado em http://localhost:8080.
+- [x] Corrigir áudio de espera picotando: desabilitado envio de silence keepalive quando a chamada estiver em modo Hold, evitando concorrência no fluxo RTP.
+- [x] Gerar e subir nova imagem Docker nathanarend/arendcalls:v2026.16 e latest no DockerHub.
+- [x] Adicionar 3 segundos de silêncio entre os loops do áudios de espera (Hold) e transferência para evitar repetição excessiva.
+- [x] Frontend: Adicionado botão de 'Espera (Hold)' na interface React (CallCard).
+- [x] GitHub: Preparar `.gitignore` para ignorar `.env` e binários para não vazar chaves de produção. Repositório local inicializado.
+- [x] GitHub: Sanitizar referências a senhas/domínios reais no README.md, ApiDocs.tsx e docker-compose.prod.yml e reescrever o commit.
+- [x] Documentação: Reescrever README.md 100% em pt-BR com design elegante, guias de Docker, arquitetura e comparativo de diferenciais.

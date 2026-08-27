@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 
 	"go.mau.fi/whatsmeow"
@@ -61,8 +62,26 @@ func (m *SessionManager) unregister(id string) {
 func (m *SessionManager) Get(id string) (*Session, bool) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	s, ok := m.sessions[id]
-	return s, ok
+	if s, ok := m.sessions[id]; ok {
+		return s, true
+	}
+	for _, s := range m.sessions {
+		if strings.EqualFold(s.name, id) || strings.EqualFold(s.id, id) {
+			return s, true
+		}
+	}
+	return nil, false
+}
+
+func (m *SessionManager) FindSessionByCall(callID string) (*Session, bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for _, s := range m.sessions {
+		if _, ok := s.reg.get(callID); ok {
+			return s, true
+		}
+	}
+	return nil, false
 }
 
 func (m *SessionManager) infos() []SessionInfo {
@@ -85,6 +104,15 @@ func (m *SessionManager) snapshotEvents() []any {
 	return []any{map[string]any{"type": "session-list", "sessions": m.infos()}}
 }
 
+func (m *SessionManager) getWebhookURL(id string) string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if s, ok := m.sessions[id]; ok {
+		return s.webhookURL
+	}
+	return ""
+}
+
 func (m *SessionManager) Restore(ctx context.Context) error {
 	rows, err := m.store.list(ctx)
 	if err != nil {
@@ -92,23 +120,35 @@ func (m *SessionManager) Restore(ctx context.Context) error {
 	}
 	for _, row := range rows {
 		if row.JID == "" {
-			_ = m.store.delete(ctx, row.ID)
+			device := m.container.NewDevice()
+			client := whatsmeow.NewClient(device, m.waLogger)
+			s := newSession(m, row.ID, row.Name, row.WebhookURL, client)
+			s.auth = AuthSnapshot{State: "logged_out", Paired: false}
+			m.register(s)
 			continue
 		}
-		jid, err := types.ParseJID(row.JID)
-		if err != nil {
-			m.log.Warn("dropping session with unparseable jid", "session", row.ID, "jid", row.JID)
-			_ = m.store.delete(ctx, row.ID)
+		jid, parseErr := types.ParseJID(row.JID)
+		if parseErr != nil {
+			m.log.Warn("session has unparseable jid; preserving session in logged_out state", "session", row.ID, "jid", row.JID)
+			device := m.container.NewDevice()
+			client := whatsmeow.NewClient(device, m.waLogger)
+			s := newSession(m, row.ID, row.Name, row.WebhookURL, client)
+			s.auth = AuthSnapshot{State: "logged_out", Paired: false}
+			m.register(s)
 			continue
 		}
 		device, err := m.container.GetDevice(ctx, jid)
 		if err != nil || device == nil {
-			m.log.Warn("dropping session with no stored device", "session", row.ID, "jid", row.JID, "err", err)
-			_ = m.store.delete(ctx, row.ID)
+			m.log.Warn("session device not found; preserving session in logged_out state", "session", row.ID, "jid", row.JID)
+			device = m.container.NewDevice()
+			client := whatsmeow.NewClient(device, m.waLogger)
+			s := newSession(m, row.ID, row.Name, row.WebhookURL, client)
+			s.auth = AuthSnapshot{State: "logged_out", Paired: false}
+			m.register(s)
 			continue
 		}
 		client := whatsmeow.NewClient(device, m.waLogger)
-		s := newSession(m, row.ID, row.Name, client)
+		s := newSession(m, row.ID, row.Name, row.WebhookURL, client)
 		m.register(s)
 		if err := s.connect(ctx); err != nil {
 			m.log.Error("session connect failed", "session", row.ID, "err", err)
@@ -126,7 +166,7 @@ func (m *SessionManager) Create(name string) (string, error) {
 	}
 	device := m.container.NewDevice()
 	client := whatsmeow.NewClient(device, m.waLogger)
-	s := newSession(m, id, name, client)
+	s := newSession(m, id, name, "", client)
 	m.register(s)
 	m.broker.emitSessionList(m.infos())
 	if err := s.startPairing(m.appCtx); err != nil {
@@ -135,6 +175,38 @@ func (m *SessionManager) Create(name string) (string, error) {
 	}
 	m.log.Info("session created", "session", id, "name", name)
 	return id, nil
+}
+
+func (m *SessionManager) Rename(ctx context.Context, id, name string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	s, ok := m.sessions[id]
+	if !ok {
+		return fmt.Errorf("no session %s", id)
+	}
+
+	if err := m.store.updateName(ctx, id, name); err != nil {
+		return fmt.Errorf("update name in store: %w", err)
+	}
+
+	s.name = name
+	m.broker.emitSessionList(m.infosLocked())
+	return nil
+}
+
+func (m *SessionManager) infosLocked() []SessionInfo {
+	ordered := make([]*Session, 0, len(m.order))
+	for _, id := range m.order {
+		if s, ok := m.sessions[id]; ok {
+			ordered = append(ordered, s)
+		}
+	}
+	out := make([]SessionInfo, 0, len(ordered))
+	for _, s := range ordered {
+		out = append(out, s.info())
+	}
+	return out
 }
 
 func (m *SessionManager) Delete(ctx context.Context, id string) error {
@@ -176,6 +248,36 @@ func (m *SessionManager) Logout(ctx context.Context, id string) error {
 	return nil
 }
 
+func (m *SessionManager) Stop(ctx context.Context, id string) error {
+	s, ok := m.Get(id)
+	if !ok {
+		return fmt.Errorf("no session %s", id)
+	}
+	s.shutdown()
+	s.setAuth(AuthSnapshot{State: "stopped", Paired: s.client.Store.ID != nil})
+	m.log.Info("session stopped", "session", id)
+	return nil
+}
+
+func (m *SessionManager) Start(ctx context.Context, id string) error {
+	s, ok := m.Get(id)
+	if !ok {
+		return fmt.Errorf("no session %s", id)
+	}
+	if s.client.IsConnected() {
+		return nil
+	}
+	if s.client.Store.ID != nil {
+		s.setAuth(AuthSnapshot{State: "connecting", Paired: true})
+		if err := s.client.Connect(); err != nil {
+			m.log.Error("session start connect failed", "session", id, "err", err)
+			return fmt.Errorf("connect failed: %w", err)
+		}
+		return nil
+	}
+	return m.Pair(id)
+}
+
 func (m *SessionManager) Pair(id string) error {
 	s, ok := m.Get(id)
 	if !ok {
@@ -203,4 +305,25 @@ func (m *SessionManager) disconnectAll() {
 	for _, s := range all {
 		s.shutdown()
 	}
+}
+
+
+func (m *SessionManager) SetWebhookURL(ctx context.Context, id, webhookURL string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	s, ok := m.sessions[id]
+	if !ok {
+		return fmt.Errorf("no session %s", id)
+	}
+
+	if err := m.store.setWebhookURL(ctx, id, webhookURL); err != nil {
+		return fmt.Errorf("update webhook_url in store: %w", err)
+	}
+
+	s.mu.Lock()
+	s.webhookURL = webhookURL
+	s.mu.Unlock()
+	m.broker.emitSessionList(m.infosLocked())
+	return nil
 }

@@ -1,0 +1,8 @@
+.git
+.github
+client/node_modules
+*.db
+*.db-shm
+*.db-wal
+bridge
+server

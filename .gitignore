@@ -36,3 +36,18 @@ Thumbs.db
 *~
 !native/
 !native/*.dll
+
+# Environment variables
+.env
+.env.*
+!.env.example
+
+# Binaries generated
+arendcalls_bin
+bridge
+server
+
+# Keys and certificates
+*.pem
+*.key
+*.crt

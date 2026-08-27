@@ -23,7 +23,7 @@ func (m *CallManager) FeedCapturedPCM(data []float32) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if m.codec == nil || m.rtpSession == nil || m.srtpSession == nil || !m.relay.HasConnection() {
+	if m.isHold || m.codec == nil || m.rtpSession == nil || m.srtpSession == nil || !m.relay.HasConnection() {
 		return
 	}
 	m.lastCaptureAt = time.Now()
@@ -93,7 +93,7 @@ func (m *CallManager) startSilenceKeepaliveLocked() {
 				return
 			case <-ticker.C:
 				m.mu.Lock()
-				ready := m.codec != nil && m.rtpSession != nil && m.srtpSession != nil && m.relay.HasConnection()
+				ready := !m.isHold && m.codec != nil && m.rtpSession != nil && m.srtpSession != nil && m.relay.HasConnection()
 				idle := time.Since(m.lastCaptureAt) > 120*time.Millisecond
 				if ready && idle {
 					if opus, err := m.codec.Encode(silence); err == nil {

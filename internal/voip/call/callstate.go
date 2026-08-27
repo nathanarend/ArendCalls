@@ -80,7 +80,7 @@ func (c *CallInfo) IsEnded() bool { return c.StateData.State == core.CallStateEn
 func (c *CallInfo) CanAccept() bool { return c.StateData.State == core.CallStateIncomingRinging }
 
 func (c *CallInfo) CanReject() bool {
-	return c.StateData.State == core.CallStateIncomingRinging || c.StateData.State == core.CallStateRinging
+	return c.StateData.State == core.CallStateIncomingRinging || c.StateData.State == core.CallStateRinging || c.StateData.State == core.CallStateInitiating
 }
 
 type InvalidTransition struct {
@@ -105,6 +105,7 @@ const (
 	TransitionResume            = "resume"
 	TransitionAudioMuteChanged  = "audio_mute_changed"
 	TransitionVideoStateChanged = "video_state_changed"
+	TransitionRingingReceived   = "ringing_received"
 )
 
 type Transition struct {
@@ -124,6 +125,12 @@ func (c *CallInfo) ApplyTransition(t Transition) error {
 		if s.State != core.CallStateInitiating {
 			return &InvalidTransition{string(s.State), t.Type}
 		}
+		s.State = core.CallStateInitiating
+
+	case TransitionRingingReceived:
+		if s.State != core.CallStateInitiating {
+			return &InvalidTransition{string(s.State), t.Type}
+		}
 		s.State = core.CallStateRinging
 
 	case TransitionOfferReceived:
@@ -134,7 +141,7 @@ func (c *CallInfo) ApplyTransition(t Transition) error {
 		s.Silenced = t.Silenced
 
 	case TransitionRemoteAccepted:
-		if s.State != core.CallStateRinging {
+		if s.State != core.CallStateRinging && s.State != core.CallStateInitiating {
 			return &InvalidTransition{string(s.State), t.Type}
 		}
 		s.State = core.CallStateConnecting
@@ -148,7 +155,7 @@ func (c *CallInfo) ApplyTransition(t Transition) error {
 		s.AcceptedAt = &now
 
 	case TransitionRemoteRejected:
-		if s.State != core.CallStateRinging {
+		if s.State != core.CallStateRinging && s.State != core.CallStateInitiating {
 			return &InvalidTransition{string(s.State), t.Type}
 		}
 		s.State = core.CallStateEnded

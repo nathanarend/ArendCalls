@@ -1,4 +1,4 @@
-export type SessionState = "connecting" | "qr" | "open" | "logged_out";
+export type SessionState = "connecting" | "qr" | "open" | "stopped" | "logged_out";
 
 export type SessionInfo = {
   id: string;
@@ -6,4 +6,5 @@ export type SessionInfo = {
   jid: string;
   state: SessionState;
   paired: boolean;
+  webhookUrl?: string;
 };

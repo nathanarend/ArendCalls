@@ -28,7 +28,18 @@ type Bridge struct {
 }
 
 func NewBridge(offerSDP string, log *slog.Logger) (*Bridge, string, error) {
-	pc, err := webrtc.NewPeerConnection(webrtc.Configuration{})
+	se := webrtc.SettingEngine{}
+	if err := se.SetEphemeralUDPPortRange(50000, 50100); err != nil {
+		return nil, "", err
+	}
+	api := webrtc.NewAPI(webrtc.WithSettingEngine(se))
+
+	config := webrtc.Configuration{
+		ICEServers: []webrtc.ICEServer{
+			{URLs: []string{"stun:stun.l.google.com:19302"}},
+		},
+	}
+	pc, err := api.NewPeerConnection(config)
 	if err != nil {
 		return nil, "", err
 	}

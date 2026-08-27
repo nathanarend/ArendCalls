@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
 	"database/sql"
+	"encoding/hex"
 	"log/slog"
 
 	"go.mau.fi/whatsmeow/store/sqlstore"
@@ -11,10 +13,16 @@ import (
 )
 
 type server struct {
-	broker    *Broker
-	sessions  *SessionManager
-	log       *slog.Logger
-	staticDir string
+	dbPath     string
+	staticDir  string
+	adminToken string
+	apiKey     string
+	maxCalls   int
+	log        *slog.Logger
+	waLogger   waLog.Logger
+
+	sessions *SessionManager
+	broker   *Broker
 }
 
 func openDB(dbPath string) (*sql.DB, error) {
@@ -27,7 +35,7 @@ func openDB(dbPath string) (*sql.DB, error) {
 	return db, nil
 }
 
-func newServer(ctx context.Context, dbPath, staticDir string, maxCalls int, log *slog.Logger) (*server, error) {
+func newServer(ctx context.Context, dbPath, staticDir, apiKey string, maxCalls int, log *slog.Logger) (*server, error) {
 	db, err := openDB(dbPath)
 	if err != nil {
 		return nil, err
@@ -49,6 +57,21 @@ func newServer(ctx context.Context, dbPath, staticDir string, maxCalls int, log 
 	broker := NewBroker()
 	mgr := newSessionManager(ctx, container, broker, store, waLogger, log, maxCalls)
 	broker.SnapshotFn = mgr.snapshotEvents
+	broker.GetWebhookURLFn = mgr.getWebhookURL
+	
+	tokenBytes := make([]byte, 16)
+	rand.Read(tokenBytes)
+	adminToken := hex.EncodeToString(tokenBytes)
 
-	return &server{broker: broker, sessions: mgr, log: log, staticDir: staticDir}, nil
+	return &server{
+		dbPath:     dbPath,
+		staticDir:  staticDir,
+		adminToken: adminToken,
+		apiKey:     apiKey,
+		maxCalls:   maxCalls,
+		log:        log,
+		waLogger:   waLogger,
+		sessions:   mgr,
+		broker:     broker,
+	}, nil
 }

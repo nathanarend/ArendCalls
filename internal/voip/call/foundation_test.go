@@ -14,8 +14,14 @@ func TestCallStateMachine(t *testing.T) {
 	if err := c.ApplyTransition(Transition{Type: TransitionOfferSent}); err != nil {
 		t.Fatal(err)
 	}
+	if c.StateData.State != core.CallStateInitiating {
+		t.Fatal("should stay Initiating after offer_sent")
+	}
+	if err := c.ApplyTransition(Transition{Type: TransitionRingingReceived}); err != nil {
+		t.Fatal(err)
+	}
 	if c.StateData.State != core.CallStateRinging {
-		t.Fatal("should be Ringing after offer_sent")
+		t.Fatal("should be Ringing after ringing_received")
 	}
 	if err := c.ApplyTransition(Transition{Type: TransitionRemoteAccepted}); err != nil {
 		t.Fatal(err)

@@ -21,10 +21,11 @@ import (
 )
 
 type Session struct {
-	id   string
-	name string
-	mgr  *SessionManager
-	log  *slog.Logger
+	id         string
+	name       string
+	webhookURL string
+	mgr        *SessionManager
+	log        *slog.Logger
 
 	client *whatsmeow.Client
 	reg    *callRegistry
@@ -33,15 +34,16 @@ type Session struct {
 	auth AuthSnapshot
 }
 
-func newSession(mgr *SessionManager, id, name string, client *whatsmeow.Client) *Session {
+func newSession(mgr *SessionManager, id, name, webhookURL string, client *whatsmeow.Client) *Session {
 	s := &Session{
-		id:     id,
-		name:   name,
-		mgr:    mgr,
-		log:    mgr.log.With("session", id),
-		client: client,
-		auth:   AuthSnapshot{State: "connecting"},
-		reg:    newCallRegistry(),
+		id:         id,
+		name:       name,
+		webhookURL: webhookURL,
+		mgr:        mgr,
+		log:        mgr.log.With("session", id),
+		client:     client,
+		auth:       AuthSnapshot{State: "connecting"},
+		reg:        newCallRegistry(),
 	}
 	client.AddEventHandler(s.handleEvent)
 	return s
@@ -54,13 +56,61 @@ func (s *Session) createCall(callID string) *call.CallManager {
 	return cm
 }
 
+func (s *Session) resolvePeerJID(peerStr string) string {
+	peerJID, err := types.ParseJID(peerStr)
+	if err != nil {
+		return peerStr
+	}
+	if peerJID.Server == "lid" {
+		pnJID, err := s.client.Store.LIDs.GetPNForLID(context.Background(), peerJID)
+		if err == nil && !pnJID.IsEmpty() {
+			return pnJID.String()
+		}
+	}
+	return peerStr
+}
+
+func (s *Session) resolvePeerName(peerStr string) string {
+	peerJID, err := types.ParseJID(peerStr)
+	if err != nil {
+		return ""
+	}
+	if peerJID.Server == "lid" {
+		pnJID, err := s.client.Store.LIDs.GetPNForLID(context.Background(), peerJID)
+		if err == nil && !pnJID.IsEmpty() {
+			peerJID = pnJID
+		}
+	}
+	
+	if s.client.Store.Contacts != nil {
+		contactInfo, err := s.client.Store.Contacts.GetContact(context.Background(), peerJID)
+		if err == nil && contactInfo.Found {
+			if contactInfo.FullName != "" {
+				return contactInfo.FullName
+			}
+			if contactInfo.FirstName != "" {
+				return contactInfo.FirstName
+			}
+			if contactInfo.PushName != "" {
+				return contactInfo.PushName
+			}
+			if contactInfo.BusinessName != "" {
+				return contactInfo.BusinessName
+			}
+		}
+	}
+	return ""
+}
+
 func (s *Session) wireCall(cm *call.CallManager, callID string) {
 	cm.OnIncoming = func(c *call.CallInfo) {
+		peer := s.resolvePeerJID(c.PeerJid)
+		peerName := s.resolvePeerName(c.PeerJid)
 		s.mgr.broker.upsertCall(CallRecord{
-			SessionID: s.id, CallID: c.CallID, Direction: "inbound", Peer: c.PeerJid,
+			SessionID: s.id, CallID: c.CallID, Direction: "inbound", Peer: peer, PeerName: peerName,
 			StartedAt: time.Now().UnixMilli(), Status: StatusRinging,
 		})
-		s.mgr.broker.emitIncoming(s.id, c.CallID, c.PeerJid)
+		s.mgr.broker.emitIncoming(s.id, c.CallID, peer, peerName)
 	}
 	cm.OnStateChange = func(c *call.CallInfo) {
 		if c.IsEnded() {
@@ -73,10 +123,13 @@ func (s *Session) wireCall(cm *call.CallManager, callID string) {
 			dir = "inbound"
 		}
 		existing, _ := s.mgr.broker.getCall(c.CallID)
+		peer := s.resolvePeerJID(c.PeerJid)
+		peerName := s.resolvePeerName(c.PeerJid)
 		rec := CallRecord{
-			SessionID: s.id, CallID: c.CallID, Direction: dir, Peer: c.PeerJid,
+			SessionID: s.id, CallID: c.CallID, Direction: dir, Peer: peer, PeerName: peerName,
 			StartedAt: time.Now().UnixMilli(), Status: mapStatus(c.StateData.State),
 		}
+		s.log.Info("call state change", "call_id", c.CallID, "raw_state", c.StateData.State, "mapped_status", rec.Status)
 		if existing != nil {
 			rec.Owner = existing.Owner
 			rec.StartedAt = existing.StartedAt
@@ -118,6 +171,24 @@ func (s *Session) onIncomingOffer(ctx context.Context, evt *events.CallOffer) {
 	node := wrapCall(evt.From, evt.Data)
 	callID := callIDFromNode(node)
 	if callID == "" {
+		return
+	}
+	// Se a chamada já existe (foi iniciada como saída por esta sessão), ignorar oferta duplicada
+	if _, exists := s.reg.get(callID); exists {
+		return
+	}
+	if s.client.Store.ID != nil {
+		info := signaling.ExtractNodeInfo(node)
+		if info != nil {
+			creator := wanode.AttrString(info.InnerNode.Attrs, "call-creator")
+			if creator != "" && (creator == s.client.Store.ID.String() || wanode.MustJID(creator).User == s.client.Store.ID.User) {
+				s.log.Info("ignoring self-originated outgoing call offer", "call_id", callID)
+				return
+			}
+		}
+	}
+	if !evt.Timestamp.IsZero() && time.Since(evt.Timestamp) > 2*time.Minute {
+		s.log.Info("ignoring stale inbound call offer", "call_id", callID, "age", time.Since(evt.Timestamp))
 		return
 	}
 	if max := s.mgr.maxCalls; max > 0 && s.reg.count() >= max {
@@ -170,6 +241,21 @@ func (s *Session) handleEvent(rawEvt any) {
 		if ac, ok := s.callForEvent(evt.From, evt.Data); ok {
 			ac.cm.HandleCallTerminate(wrapCall(evt.From, evt.Data))
 		}
+	case *events.Receipt:
+		s.log.Info("receipt received", "type", string(evt.Type), "sender", evt.Sender.String())
+		if evt.Type == types.ReceiptTypeDelivered || string(evt.Type) == "ringer" {
+			peerJID := evt.Sender
+			if peerJID.Server == "lid" {
+				if pn, err := s.client.Store.LIDs.GetPNForLID(context.Background(), peerJID); err == nil && !pn.IsEmpty() {
+					peerJID = pn
+				}
+			}
+			if ac, ok := s.reg.getByPeer(peerJID); ok {
+				ac.cm.HandleCallRinging()
+			} else if ac, ok := s.reg.getByPeer(evt.Sender); ok {
+				ac.cm.HandleCallRinging()
+			}
+		}
 	}
 }
 
@@ -220,12 +306,13 @@ func (s *Session) setAuth(a AuthSnapshot) {
 func (s *Session) info() SessionInfo {
 	s.mu.Lock()
 	a := s.auth
+	webhookURL := s.webhookURL
 	s.mu.Unlock()
 	jid := ""
 	if id := s.client.Store.ID; id != nil {
 		jid = id.String()
 	}
-	return SessionInfo{ID: s.id, Name: s.name, JID: jid, State: a.State, Paired: a.Paired || jid != ""}
+	return SessionInfo{ID: s.id, Name: s.name, JID: jid, State: a.State, Paired: a.Paired || jid != "", QR: a.QR, WebhookURL: webhookURL}
 }
 
 func (s *Session) setBridge(callID string, b *Bridge) {
@@ -235,6 +322,7 @@ func (s *Session) setBridge(callID string, b *Bridge) {
 		return
 	}
 	if oldB != nil {
+		oldB.OnTerminalICE = nil
 		oldB.Close()
 	}
 }
@@ -280,7 +368,7 @@ func (s *Session) shutdown() {
 
 func mapStatus(state core.CallState) CallStatus {
 	switch state {
-	case core.CallStateActive:
+	case core.CallStateActive, core.CallStateConnecting, core.CallStateOnHold:
 		return StatusConnected
 	case core.CallStateEnded:
 		return StatusEnded

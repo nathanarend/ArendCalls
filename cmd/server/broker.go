@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
 	"sync"
@@ -22,6 +23,7 @@ type CallRecord struct {
 	Owner     *string    `json:"owner"`
 	Direction string     `json:"direction"`
 	Peer      string     `json:"peer"`
+	PeerName  string     `json:"peerName,omitempty"`
 	StartedAt int64      `json:"startedAt"`
 	Status    CallStatus `json:"status"`
 	EndedAt   *int64     `json:"endedAt,omitempty"`
@@ -35,16 +37,19 @@ type AuthSnapshot struct {
 }
 
 type SessionInfo struct {
-	ID     string `json:"id"`
-	Name   string `json:"name"`
-	JID    string `json:"jid"`
-	State  string `json:"state"`
-	Paired bool   `json:"paired"`
+	ID         string `json:"id"`
+	Name       string `json:"name"`
+	JID        string `json:"jid"`
+	State      string `json:"state"`
+	Paired     bool   `json:"paired"`
+	QR         string `json:"qr,omitempty"`
+	WebhookURL string `json:"webhookUrl,omitempty"`
 }
 
 type subscriber struct {
-	clientID string
-	ch       chan []byte
+	clientID  string
+	sessionID string
+	ch        chan []byte
 }
 
 type Broker struct {
@@ -53,7 +58,8 @@ type Broker struct {
 	calls   map[string]*CallRecord
 	history []CallRecord
 
-	SnapshotFn func() []any
+	SnapshotFn      func() []any
+	GetWebhookURLFn func(sessionID string) string
 }
 
 func NewBroker() *Broker {
@@ -64,7 +70,11 @@ func NewBroker() *Broker {
 }
 
 func (b *Broker) subscribe(clientID string) *subscriber {
-	s := &subscriber{clientID: clientID, ch: make(chan []byte, 32)}
+	return b.subscribeSession(clientID, "")
+}
+
+func (b *Broker) subscribeSession(clientID, sessionID string) *subscriber {
+	s := &subscriber{clientID: clientID, sessionID: sessionID, ch: make(chan []byte, 32)}
 	b.mu.Lock()
 	b.subs[s] = struct{}{}
 	b.mu.Unlock()
@@ -79,13 +89,65 @@ func (b *Broker) unsubscribe(s *subscriber) {
 }
 
 func (b *Broker) broadcast(ev any) {
-	data, err := json.Marshal(ev)
-	if err != nil {
-		return
-	}
 	b.mu.RLock()
 	defer b.mu.RUnlock()
+
+	// Extract generic payload data for Webhook
+	webhookData, errWebhook := json.Marshal(ev)
+	if errWebhook == nil {
+		var webhookURL string
+		if m, ok := ev.(map[string]any); ok {
+			if sid, ok := m["sessionId"].(string); ok && sid != "" && b.GetWebhookURLFn != nil {
+				webhookURL = b.GetWebhookURLFn(sid)
+			}
+		}
+		if webhookURL != "" {
+			go func(url string, payload []byte) {
+				http.Post(url, "application/json", bytes.NewBuffer(payload))
+			}(webhookURL, webhookData)
+		}
+	}
+
 	for s := range b.subs {
+		payload := ev
+		
+		// If the subscriber is limited to a session, filter/discard events
+		if s.sessionID != "" {
+			if m, ok := ev.(map[string]any); ok {
+				// 1. Skip global session lists
+				if m["type"] == "session-list" {
+					continue
+				}
+				
+				// 2. Filter call-list to only include calls for this session
+				if m["type"] == "call-list" {
+					if calls, ok := m["calls"].([]CallRecord); ok {
+						filtered := make([]CallRecord, 0)
+						for _, c := range calls {
+							if c.SessionID == s.sessionID {
+								filtered = append(filtered, c)
+							}
+						}
+						payload = map[string]any{
+							"type":  "call-list",
+							"calls": filtered,
+						}
+					}
+				} else {
+					// 3. For session-specific events, verify session match
+					evSessID, hasSess := m["sessionId"].(string)
+					if hasSess && evSessID != s.sessionID {
+						continue
+					}
+				}
+			}
+		}
+
+		data, err := json.Marshal(payload)
+		if err != nil {
+			continue
+		}
+
 		select {
 		case s.ch <- data:
 		default:
@@ -193,9 +255,9 @@ func (b *Broker) broadcastCallList() {
 	b.broadcast(map[string]any{"type": "call-list", "calls": list})
 }
 
-func (b *Broker) emitIncoming(sessionID, id, peer string) {
+func (b *Broker) emitIncoming(sessionID, id, peer, peerName string) {
 	b.broadcast(map[string]any{
-		"type": "incoming", "sessionId": sessionID, "id": id, "peer": peer, "offeredAt": time.Now().UnixMilli(),
+		"type": "incoming", "sessionId": sessionID, "id": id, "peer": peer, "peerName": peerName, "offeredAt": time.Now().UnixMilli(),
 	})
 }
 
@@ -259,4 +321,53 @@ func writeSSE(w http.ResponseWriter, f http.Flusher, ev any) {
 	data, _ := json.Marshal(ev)
 	w.Write(append(append([]byte("data: "), data...), '\n', '\n'))
 	f.Flush()
+}
+
+func (b *Broker) serveSSESession(w http.ResponseWriter, r *http.Request, clientID, sessionID string, sess *Session) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+
+	sub := b.subscribeSession(clientID, sessionID)
+	defer b.unsubscribe(sub)
+
+	// Send initial session auth state
+	if sess != nil {
+		sess.mu.Lock()
+		state := sess.auth.State
+		paired := sess.auth.Paired || (sess.client.Store.ID != nil)
+		qr := sess.auth.QR
+		sess.mu.Unlock()
+		writeSSE(w, flusher, map[string]any{
+			"type": "auth-state", "sessionId": sessionID,
+			"paired": paired, "state": state, "qr": qr,
+		})
+	}
+
+	// Emit call list which will trigger a filtered broadcastCallList only for this sub
+	b.broadcastCallList()
+
+	keepalive := time.NewTicker(20 * time.Second)
+	defer keepalive.Stop()
+
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case data := <-sub.ch:
+			if _, err := w.Write(append(append([]byte("data: "), data...), '\n', '\n')); err != nil {
+				return
+			}
+			flusher.Flush()
+		case <-keepalive.C:
+			w.Write([]byte(": ping\n\n"))
+			flusher.Flush()
+		}
+	}
 }

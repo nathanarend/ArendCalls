@@ -40,7 +40,7 @@ func (m *SessionManager) addUnconnected(t *testing.T, name string) *Session {
 		t.Fatal(err)
 	}
 	client := whatsmeow.NewClient(m.container.NewDevice(), waLog.Noop)
-	s := newSession(m, id, name, client)
+	s := newSession(m, id, name, "", client)
 	m.register(s)
 	return s
 }

@@ -13,9 +13,9 @@ export const SessionPairing = ({ session }: { session: SessionInfo }) => {
     <div className="flex min-h-[55vh] items-center justify-center">
       <Card className="w-full max-w-md">
         <CardHeader className="items-center text-center">
-          <CardTitle>Pair {session.name}</CardTitle>
+          <CardTitle>Parear {session.name}</CardTitle>
           <CardDescription>
-            Open WhatsApp → Linked devices → Link a device, then scan.
+            Abra o WhatsApp → Aparelhos conectados → Conectar um aparelho e escaneie o código.
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col items-center gap-4">
@@ -24,12 +24,12 @@ export const SessionPairing = ({ session }: { session: SessionInfo }) => {
               <QRCodeSVG value={qr} size={232} marginSize={1} />
             </div>
           ) : session.state === "logged_out" ? (
-            <Badge variant="destructive">Disconnected — use Reactivate above to get a QR</Badge>
+            <Badge variant="destructive">Desconectado — use Reconectar acima para obter um QR code</Badge>
           ) : (
             <>
               <Skeleton className="h-[258px] w-[258px] rounded-lg" />
               <Badge variant="muted" className="gap-1.5">
-                <Loader2 className="h-3 w-3 animate-spin" /> Waiting for QR…
+                <Loader2 className="h-3 w-3 animate-spin" /> Aguardando QR code…
               </Badge>
             </>
           )}
