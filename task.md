@@ -25,3 +25,4 @@
 - [x] GitHub: Preparar `.gitignore` para ignorar `.env` e binários para não vazar chaves de produção. Repositório local inicializado.
 - [x] GitHub: Sanitizar referências a senhas/domínios reais no README.md, ApiDocs.tsx e docker-compose.prod.yml e reescrever o commit.
 - [x] Documentação: Reescrever README.md 100% em pt-BR com design elegante, guias de Docker, arquitetura e comparativo de diferenciais.
+- [x] Release: Criar tag `v2026.16` para versionamento do projeto sincronizado com o DockerHub.
