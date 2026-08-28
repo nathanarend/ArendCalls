@@ -41,7 +41,11 @@ export const openCall = async (
     if (dc.readyState === "open") dc.send(float32ToInt16LE(e.data));
   };
   micSource.connect(captureNode);
-  captureNode.connect(ctx.destination);
+  // Conectar a um GainNode zerado para manter o clock do AudioWorklet ativo sem reproduzir o próprio microfone
+  const muteGain = ctx.createGain();
+  muteGain.gain.value = 0;
+  captureNode.connect(muteGain);
+  muteGain.connect(ctx.destination);
 
   const playbackNode = new AudioWorkletNode(ctx, PLAYBACK_PROCESSOR_NAME);
   const streamDest = ctx.createMediaStreamDestination();

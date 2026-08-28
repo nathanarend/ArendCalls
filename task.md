@@ -26,3 +26,19 @@
 - [x] GitHub: Sanitizar referências a senhas/domínios reais no README.md, ApiDocs.tsx e docker-compose.prod.yml e reescrever o commit.
 - [x] Documentação: Reescrever README.md 100% em pt-BR com design elegante, guias de Docker, arquitetura e comparativo de diferenciais.
 - [x] Release: Criar tag `v2026.16` para versionamento do projeto sincronizado com o DockerHub.
+- [x] Backend: Implementar endpoint `GET /api/system/metrics` com métricas em tempo real (RAM VPS/Processo, CPU, Uptime, Goroutines, VoIP).
+- [x] Frontend: Criar componente `SystemMetricsModal` e botão discreto na UI com polling apenas enquanto o modal estiver aberto.
+- [x] Frontend: Compilar aplicação React (`npm run build`).
+- [x] Backend: Validar testes automatizados com `go test -v ./...`.
+- [x] Servidor: Subir servidor localmente e validar o funcionamento em tempo real.
+- [x] Backend: Corrigir `EndCall` e `RejectCall` em `callmanager.go` com context desacoplado e envio síncrono da stanza antes de `cleanupMedia()`.
+- [x] Backend: Corrigir resolução de JID/LID nos eventos de término (`events.CallTerminate`/`CallReject`) e adicionar timeout de ringing (60s) para chamadas não atendidas.
+- [x] Backend: Finalizar chamadas ativas imediatamente ao detectar fechamento dos relays ICE.
+- [x] Backend: Otimizar MLow FFT com tabelas twiddle pré-computadas e scratch reutilizável no `internal/voip/media/mlow/fft.go`.
+- [x] Frontend: Implementar Jitter Buffer adaptativo (~50ms) no `playback-processor.js` com atenuação suave.
+- [x] Frontend: Alinhar envio de áudio do microfone em blocos de 20ms (320 samples) e isolar saída de som em `webrtc.ts`.
+- [x] Frontend: Garantir botão de encerramento/recusa em chamadas ativas (incluindo chamadas inbound).
+- [x] Telemetria: Adicionar medição de CPU do processo ArendCalls (`cpuPercent`) no backend Go e no modal React.
+- [x] Validação: Bloquear auto-chamadas com suporte a 8 e 9 dígitos no Brasil no frontend (toast imediato) e backend (antes e pós `IsOnWhatsApp`).
+- [x] UI/UX: Implementar botões arredondados modernos para controle de sessão e histórico.
+- [x] Testes: Validar suíte Go e build do React.

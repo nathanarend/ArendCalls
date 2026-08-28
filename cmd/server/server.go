@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"log/slog"
+	"time"
 
 	"go.mau.fi/whatsmeow/store/sqlstore"
 	waLog "go.mau.fi/whatsmeow/util/log"
@@ -21,8 +22,9 @@ type server struct {
 	log        *slog.Logger
 	waLogger   waLog.Logger
 
-	sessions *SessionManager
-	broker   *Broker
+	sessions  *SessionManager
+	broker    *Broker
+	startTime time.Time
 }
 
 func openDB(dbPath string) (*sql.DB, error) {
@@ -71,7 +73,8 @@ func newServer(ctx context.Context, dbPath, staticDir, apiKey string, maxCalls i
 		maxCalls:   maxCalls,
 		log:        log,
 		waLogger:   waLogger,
-		sessions:   mgr,
-		broker:     broker,
+		sessions:  mgr,
+		broker:    broker,
+		startTime: time.Now(),
 	}, nil
 }

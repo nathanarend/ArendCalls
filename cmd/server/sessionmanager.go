@@ -327,3 +327,19 @@ func (m *SessionManager) SetWebhookURL(ctx context.Context, id, webhookURL strin
 	m.broker.emitSessionList(m.infosLocked())
 	return nil
 }
+
+func (m *SessionManager) SessionCounts() (total int, connected int) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	total = len(m.sessions)
+	for _, s := range m.sessions {
+		s.mu.Lock()
+		client := s.client
+		s.mu.Unlock()
+		if client != nil && client.IsConnected() {
+			connected++
+		}
+	}
+	return total, connected
+}
+

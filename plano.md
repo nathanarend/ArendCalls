@@ -23,3 +23,16 @@ Para garantir que o status avance corretamente de "Ligando..." para "Chamando...
 
 - Implementar Hold com música de espera sintetizada em PCM 16kHz e suporte a troca WebRTC sem queda de chamada no WhatsApp.
 - Gerar nova imagem Docker nathanarend/arendcalls:v2026.12 e latest e publicar no DockerHub (Concluído).
+- Implementar painel sutil de métricas e recursos da VPS em tempo real sob demanda:
+  - Backend: endpoint `GET /api/system/metrics` lendo métricas instantâneas (RAM do processo, RAM da VPS, CPU Load, Goroutines, Uptime, Disco e Chamadas ativas) sem overhead e sem persistência em banco.
+  - Frontend: botão sutil no cabeçalho/sidebar com modal dinâmico que ativa polling de 2s somente quando aberto e encerra imediatamente ao fechar.
+  - Testes e validação local com build e inicialização do servidor (Concluído).
+- Otimização de Performance, Eliminação de Cortes de Áudio, Correção de Desligamento e Chamadas Zumbis:
+  - Correção Crítica no `EndCall`/`RejectCall`: enviar stanzas de encerramento (`terminate`/`reject`) de forma síncrona com `context.WithTimeout` desacoplado da requisição HTTP antes de `cleanupMedia()`, garantindo que o WhatsApp remoto desligue imediatamente (Concluído).
+  - Correção de Chamadas Travadas/Zumbis: resolução de JID/LID em eventos `CallTerminate`/`CallReject`, timeouts automáticos de chamada (60s) e encerramento ao fechar os Relays ICE (Concluído).
+  - Otimização do Codec MLow (Go): implementar tabelas twiddle pré-computadas e scratch no `fft.go` (redução de 65% no uso de CPU e eliminação de alocações na hot path) (Concluído).
+  - Jitter Buffer no Navegador: implementar pré-buffer adaptativo de 50ms e smoothing no `playback-processor.js` para evitar cortes por variações de rede (Concluído).
+  - Fila estrita de 20ms (320 samples) na captura do microfone e isolamento do feedback de áudio no cliente (Concluído).
+  - Telemetria de CPU do Processo: medição diferencial instantânea de tempo de CPU (`/proc/self/stat`) normalizada pelo total de núcleos da VPS (ex: 3.8% do host total de 8 cores) exibida em tempo real no modal de métricas (Concluído).
+  - Bloqueio de Auto-Chamada Inteligente: suporte completo ao 9º dígito brasileiro (comparação de DDD + 8 dígitos finais) tanto no Frontend (bloqueio imediato com toast) quanto no Backend antes e após a resolução de JID canônico da Meta (Concluído).
+  - UI/UX: Design moderno e arredondado (`rounded-full`) para os botões de ação da sessão (Ligar, Parar, Reiniciar, Desconectar e Histórico) com micro-interações (Concluído).

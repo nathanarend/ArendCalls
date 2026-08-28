@@ -202,7 +202,12 @@ func (m *CallManager) RejectCall(ctx context.Context, callID string, reason core
 	m.emitState()
 	m.mu.Unlock()
 
-	go func() { _, _ = m.sock.Query(ctx, node) }()
+	sendCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	if _, err := m.sock.Query(sendCtx, node); err != nil {
+		m.log.Warn("failed to send call reject stanza", "call_id", callID, "err", err)
+	}
+
 	m.cleanupMedia()
 	return nil
 }
@@ -220,7 +225,12 @@ func (m *CallManager) EndCall(ctx context.Context, reason core.EndCallReason) er
 	m.emitState()
 	m.mu.Unlock()
 
-	go func() { _, _ = m.sock.Query(ctx, node) }()
+	sendCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	if _, err := m.sock.Query(sendCtx, node); err != nil {
+		m.log.Warn("failed to send call terminate stanza", "call_id", call.CallID, "err", err)
+	}
+
 	if m.OnEnded != nil {
 		m.OnEnded(ended)
 	}

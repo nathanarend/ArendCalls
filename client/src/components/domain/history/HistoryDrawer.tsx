@@ -14,8 +14,12 @@ export const HistoryDrawer = ({ sid }: { sid: string }) => {
   return (
     <Sheet open={open} onOpenChange={setOpen}>
       <SheetTrigger asChild>
-        <Button variant="outline" size="sm">
-          <History className="h-4 w-4" />
+        <Button 
+          variant="outline" 
+          size="sm"
+          className="rounded-full px-3.5 text-xs font-semibold gap-1.5 shadow-xs border-border/80 bg-background/90 hover:bg-muted/80 hover:border-border transition-all duration-150 active:scale-95"
+        >
+          <History className="h-3.5 w-3.5 text-muted-foreground" />
           Histórico
         </Button>
       </SheetTrigger>

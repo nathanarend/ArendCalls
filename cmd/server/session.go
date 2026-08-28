@@ -103,6 +103,33 @@ func (s *Session) resolvePeerName(peerStr string) string {
 }
 
 func (s *Session) wireCall(cm *call.CallManager, callID string) {
+	var timeoutTimer *time.Timer
+	var timeoutMu sync.Mutex
+
+	stopTimeout := func() {
+		timeoutMu.Lock()
+		defer timeoutMu.Unlock()
+		if timeoutTimer != nil {
+			timeoutTimer.Stop()
+			timeoutTimer = nil
+		}
+	}
+
+	startTimeout := func() {
+		timeoutMu.Lock()
+		defer timeoutMu.Unlock()
+		if timeoutTimer != nil {
+			timeoutTimer.Stop()
+		}
+		timeoutTimer = time.AfterFunc(60*time.Second, func() {
+			s.log.Info("call ringing timeout reached (60s), ending stale call", "call_id", callID)
+			_ = cm.EndCall(context.Background(), core.EndCallReason("timeout"))
+		})
+	}
+
+	// Inicia o timer de 60s para evitar chamada zumbi
+	startTimeout()
+
 	cm.OnIncoming = func(c *call.CallInfo) {
 		peer := s.resolvePeerJID(c.PeerJid)
 		peerName := s.resolvePeerName(c.PeerJid)
@@ -114,9 +141,13 @@ func (s *Session) wireCall(cm *call.CallManager, callID string) {
 	}
 	cm.OnStateChange = func(c *call.CallInfo) {
 		if c.IsEnded() {
+			stopTimeout()
 			s.removeCall(c.CallID)
 			s.mgr.broker.endCall(c.CallID, string(c.StateData.EndReason))
 			return
+		}
+		if c.StateData.State == core.CallStateActive || c.StateData.State == core.CallStateConnecting {
+			stopTimeout()
 		}
 		dir := "outbound"
 		if c.Direction == core.CallDirectionIncoming {
@@ -137,6 +168,7 @@ func (s *Session) wireCall(cm *call.CallManager, callID string) {
 		s.mgr.broker.upsertCall(rec)
 	}
 	cm.OnEnded = func(c *call.CallInfo) {
+		stopTimeout()
 		s.removeCall(c.CallID)
 		s.mgr.broker.endCall(c.CallID, string(c.StateData.EndReason))
 	}
@@ -234,12 +266,38 @@ func (s *Session) handleEvent(rawEvt any) {
 			ac.cm.HandleCallTransport(ctx, wrapCall(evt.From, evt.Data), evt.From)
 		}
 	case *events.CallTerminate:
+		node := wrapCall(evt.From, evt.Data)
 		if ac, ok := s.callForEvent(evt.From, evt.Data); ok {
-			ac.cm.HandleCallTerminate(wrapCall(evt.From, evt.Data))
+			ac.cm.HandleCallTerminate(node)
+		} else {
+			peerJID := evt.From
+			if peerJID.Server == "lid" {
+				if pn, err := s.client.Store.LIDs.GetPNForLID(context.Background(), peerJID); err == nil && !pn.IsEmpty() {
+					peerJID = pn
+				}
+			}
+			if ac, ok := s.reg.getByPeer(peerJID); ok {
+				ac.cm.HandleCallTerminate(node)
+			} else if ac, ok := s.reg.getByPeer(evt.From); ok {
+				ac.cm.HandleCallTerminate(node)
+			}
 		}
 	case *events.CallReject:
+		node := wrapCall(evt.From, evt.Data)
 		if ac, ok := s.callForEvent(evt.From, evt.Data); ok {
-			ac.cm.HandleCallTerminate(wrapCall(evt.From, evt.Data))
+			ac.cm.HandleCallTerminate(node)
+		} else {
+			peerJID := evt.From
+			if peerJID.Server == "lid" {
+				if pn, err := s.client.Store.LIDs.GetPNForLID(context.Background(), peerJID); err == nil && !pn.IsEmpty() {
+					peerJID = pn
+				}
+			}
+			if ac, ok := s.reg.getByPeer(peerJID); ok {
+				ac.cm.HandleCallTerminate(node)
+			} else if ac, ok := s.reg.getByPeer(evt.From); ok {
+				ac.cm.HandleCallTerminate(node)
+			}
 		}
 	case *events.Receipt:
 		s.log.Info("receipt received", "type", string(evt.Type), "sender", evt.Sender.String())

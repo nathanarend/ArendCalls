@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Disc3, Phone, AlertCircle } from "lucide-react";
+import { toast } from "sonner";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -19,9 +20,40 @@ export const Dialer = ({ sid }: { sid: string }) => {
   const isConnected = currentSession?.state === "open";
   const isStopped = currentSession?.state === "stopped";
 
+  const cleanDigits = (s: string) => s.replace(/\D/g, "");
+
+  const isSamePhone = (a: string, b: string) => {
+    const aDigits = cleanDigits(a);
+    const bDigits = cleanDigits(b);
+    if (!aDigits || !bDigits) return false;
+    if (aDigits === bDigits) return true;
+    // Se ambos forem números do Brasil (DDI 55)
+    if (aDigits.startsWith("55") && bDigits.startsWith("55")) {
+      if ((aDigits.length === 12 || aDigits.length === 13) && (bDigits.length === 12 || bDigits.length === 13)) {
+        const dddA = aDigits.slice(2, 4);
+        const dddB = bDigits.slice(2, 4);
+        if (dddA === dddB) {
+          const last8A = aDigits.slice(-8);
+          const last8B = bDigits.slice(-8);
+          return last8A === last8B;
+        }
+      }
+    }
+    return false;
+  };
+
   const submit = () => {
-    if (!phone.trim() || startCall.isPending || !isConnected) return;
-    startCall.mutate({ phone: phone.trim(), record }, { onSuccess: () => setPhone("") });
+    const trimmed = phone.trim();
+    if (!trimmed || startCall.isPending || !isConnected) return;
+
+    const sessionPhone = currentSession?.jid ? currentSession.jid.split(":")[0].split("@")[0] : "";
+
+    if (sessionPhone && isSamePhone(sessionPhone, trimmed)) {
+      toast.error("Você não pode ligar para si mesmo.");
+      return;
+    }
+
+    startCall.mutate({ phone: trimmed, record }, { onSuccess: () => setPhone("") });
   };
 
   return (

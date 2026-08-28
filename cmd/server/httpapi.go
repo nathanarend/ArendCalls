@@ -34,6 +34,7 @@ func (s *server) routes() http.Handler {
 	mux.HandleFunc("POST /api/sessions/{sid}/check-number", s.handleCheckNumber)
 
 	mux.HandleFunc("GET /api/events", s.handleEvents)
+	mux.HandleFunc("GET /api/system/metrics", s.handleSystemMetrics)
 
 	mux.HandleFunc("GET /api/sessions/{sid}/events", s.handleSessionEvents)
 
@@ -336,6 +337,13 @@ func (s *server) doStartCall(sess *Session, w http.ResponseWriter, r *http.Reque
 		return
 	}
 	norm := normalizePhone(body.Phone)
+	if sess.client.Store.ID != nil {
+		ownUser := sess.client.Store.ID.User
+		if ownUser != "" && isSamePhoneNumber(ownUser, norm) {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "você não pode ligar para si mesmo"})
+			return
+		}
+	}
 	res, err := sess.client.IsOnWhatsApp(r.Context(), []string{"+" + norm})
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "falha ao verificar número na rede: " + err.Error()})
@@ -346,6 +354,15 @@ func (s *server) doStartCall(sess *Session, w http.ResponseWriter, r *http.Reque
 		return
 	}
 	peer := res[0].JID
+
+	// Validação pós-resolução do WhatsApp (caso o JID retornado pela Meta seja a própria conta)
+	if sess.client.Store.ID != nil {
+		ownUser := sess.client.Store.ID.User
+		if ownUser != "" && (peer.User == ownUser || isSamePhoneNumber(peer.User, ownUser)) {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "você não pode ligar para si mesmo"})
+			return
+		}
+	}
 
 	callID, err := sess.startOutgoing(r.Context(), peer, false)
 	if err != nil {
@@ -528,4 +545,41 @@ func (s *server) handleCheckNumber(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusOK, map[string]any{"results": out})
 }
+
+func isSamePhoneNumber(a, b string) bool {
+	aDigits := cleanOnlyDigits(a)
+	bDigits := cleanOnlyDigits(b)
+	if aDigits == "" || bDigits == "" {
+		return false
+	}
+	if aDigits == bDigits {
+		return true
+	}
+	// Se ambos forem números do Brasil (DDI 55)
+	if strings.HasPrefix(aDigits, "55") && strings.HasPrefix(bDigits, "55") {
+		// Pode ter 12 (55 + DDD de 2 dígitos + 8 dígitos) ou 13 dígitos (55 + DDD + 9 dígitos)
+		if (len(aDigits) == 12 || len(aDigits) == 13) && (len(bDigits) == 12 || len(bDigits) == 13) {
+			dddA := aDigits[2:4]
+			dddB := bDigits[2:4]
+			if dddA == dddB {
+				// Compara os 8 dígitos finais
+				last8A := aDigits[len(aDigits)-8:]
+				last8B := bDigits[len(bDigits)-8:]
+				return last8A == last8B
+			}
+		}
+	}
+	return false
+}
+
+func cleanOnlyDigits(s string) string {
+	var sb strings.Builder
+	for _, r := range s {
+		if r >= '0' && r <= '9' {
+			sb.WriteRune(r)
+		}
+	}
+	return sb.String()
+}
+
 

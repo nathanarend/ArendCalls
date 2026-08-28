@@ -196,6 +196,7 @@ Todas as rotas são isoladas por identificador de sessão (`{sid}`):
 | `POST` | `/api/sessions/{sid}/calls/{id}/hold` | Colocar em Espera / Retomar (`{ hold: true/false }`) |
 | `DELETE` | `/api/sessions/{sid}/calls/{id}` | Desligar/Encerrar chamada ativa |
 | `GET` | `/api/sessions/{sid}/history` | Histórico das últimas 50 chamadas da instância |
+| `GET` | `/api/system/metrics` | Telemetria sob demanda da VPS e ArendCalls (RAM, CPU, Uptime, Disco) |
 | `GET` | `/api/events` | Stream global de eventos em tempo real (SSE) |
 
 ---

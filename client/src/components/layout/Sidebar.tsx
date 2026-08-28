@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Plus, Trash2, Pencil, BookOpen, Settings } from "lucide-react";
+import { Plus, Trash2, Pencil, BookOpen, Settings, Activity } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -11,6 +11,7 @@ import type { SessionInfo, SessionState } from "@/types/session";
 import { NewSessionModal } from "@/components/domain/session/NewSessionModal";
 import { EditSessionModal } from "@/components/domain/session/EditSessionModal";
 import { SessionSettingsModal } from "@/components/domain/session/SessionSettingsModal";
+import { SystemMetricsModal } from "@/components/domain/system/SystemMetricsModal";
 
 const dotClass: Record<SessionState, string> = {
   open: "bg-emerald-500",
@@ -27,6 +28,7 @@ export const Sidebar = ({ onNavigate }: { onNavigate?: () => void }) => {
   
   // Dialogs state
   const [showNewDialog, setShowNewDialog] = useState(false);
+  const [showMetricsDialog, setShowMetricsDialog] = useState(false);
   const [editingSession, setEditingSession] = useState<SessionInfo | null>(null);
   const [settingsSession, setSettingsSession] = useState<SessionInfo | null>(null);
 
@@ -46,14 +48,23 @@ export const Sidebar = ({ onNavigate }: { onNavigate?: () => void }) => {
     <div className="flex h-full flex-col gap-2 p-3">
       <div className="flex items-center justify-between px-2 pt-1">
         <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Contas</p>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5">
+          <button 
+            onClick={() => setShowMetricsDialog(true)}
+            className="text-muted-foreground hover:text-emerald-500 transition-colors p-1"
+            title="Recursos do Servidor (VPS)"
+            aria-label="Recursos do Servidor (VPS)"
+          >
+            <Activity className="h-4 w-4" />
+          </button>
           <button 
             onClick={() => {
               setActiveSession("api-docs"); // special ID for docs
               onNavigate?.();
             }}
-            className="text-muted-foreground hover:text-foreground transition-colors"
+            className="text-muted-foreground hover:text-foreground transition-colors p-1"
             title="Documentação da API"
+            aria-label="Documentação da API"
           >
             <BookOpen className="h-4 w-4" />
           </button>
@@ -148,6 +159,11 @@ export const Sidebar = ({ onNavigate }: { onNavigate?: () => void }) => {
         session={settingsSession} 
         onClose={() => setSettingsSession(null)} 
         onUpdateSession={updateLocalSettingsSession} 
+      />
+
+      <SystemMetricsModal 
+        open={showMetricsDialog} 
+        onOpenChange={setShowMetricsDialog} 
       />
     </div>
   );

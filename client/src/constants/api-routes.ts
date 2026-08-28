@@ -9,6 +9,7 @@ export interface RouteInfo {
 export const adminRoutes: RouteInfo[] = [
   { method: "GET", path: "/api/sessions", purpose: "Listar todas as contas (id, nome, jid, status, pareamento)" },
   { method: "POST", path: "/api/sessions", purpose: "Criar uma conta e iniciar o pareamento QR", payload: { name: "Minha Nova Conta" } },
+  { method: "GET", path: "/api/system/metrics", purpose: "Obter telemetria em tempo real do ArendCalls e recursos da VPS (RAM, CPU, Uptime, Disco)" },
   { method: "GET", path: "/api/events", purpose: "Eventos Server-Sent globais e disparo de Webhooks em paralelo" },
 ];
 

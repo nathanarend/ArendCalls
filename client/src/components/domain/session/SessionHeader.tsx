@@ -50,9 +50,9 @@ export const SessionHeader = ({ session }: { session: SessionInfo }) => {
           size="sm" 
           disabled={busy || session.state === "open"} 
           onClick={() => run(() => startSession(session.id))}
-          className="text-xs font-bold gap-1.5"
+          className="rounded-full px-3.5 text-xs font-semibold gap-1.5 shadow-xs border-indigo-200/70 dark:border-indigo-900/40 bg-indigo-50/40 dark:bg-indigo-950/20 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-100/70 hover:text-indigo-700 transition-all duration-150 active:scale-95"
         >
-          <Play className="h-3.5 w-3.5 fill-current text-indigo-500" />
+          <Play className="h-3 w-3 fill-current text-indigo-500" />
           Ligar
         </Button>
 
@@ -61,9 +61,9 @@ export const SessionHeader = ({ session }: { session: SessionInfo }) => {
           size="sm" 
           disabled={busy || session.state === "stopped"} 
           onClick={() => run(() => stopSession(session.id))}
-          className="text-xs font-bold gap-1.5"
+          className="rounded-full px-3.5 text-xs font-semibold gap-1.5 shadow-xs border-zinc-200 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-900/40 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100/80 hover:text-zinc-900 transition-all duration-150 active:scale-95"
         >
-          <Square className="h-3.5 w-3.5 fill-current text-zinc-500" />
+          <Square className="h-3 w-3 fill-current text-zinc-500" />
           Parar
         </Button>
 
@@ -72,21 +72,21 @@ export const SessionHeader = ({ session }: { session: SessionInfo }) => {
           size="sm" 
           disabled={busy} 
           onClick={() => run(() => restartSession(session.id))}
-          className="text-xs font-bold gap-1.5"
+          className="rounded-full px-3.5 text-xs font-semibold gap-1.5 shadow-xs border-border/80 bg-background/90 hover:bg-muted/80 hover:border-border transition-all duration-150 active:scale-95"
         >
-          <RefreshCcw className={`h-3.5 w-3.5 ${busy ? "animate-spin" : ""}`} />
+          <RefreshCcw className={`h-3 w-3 ${busy ? "animate-spin" : ""}`} />
           Reiniciar
         </Button>
 
         {session.paired ? (
           <Button 
-            variant="ghost" 
+            variant="outline" 
             size="sm" 
             disabled={busy} 
             onClick={() => run(() => logoutSession(session.id))}
-            className="text-xs font-bold gap-1.5 text-rose-500 hover:text-rose-600 hover:bg-rose-500/10"
+            className="rounded-full px-3.5 text-xs font-semibold gap-1.5 shadow-xs border-rose-200/70 dark:border-rose-900/40 bg-rose-50/40 dark:bg-rose-950/20 text-rose-600 dark:text-rose-400 hover:bg-rose-100/80 hover:text-rose-700 hover:border-rose-300/80 transition-all duration-150 active:scale-95"
           >
-            <LogOut className="h-3.5 w-3.5" />
+            <LogOut className="h-3 w-3" />
             Desconectar
           </Button>
         ) : (
@@ -94,7 +94,7 @@ export const SessionHeader = ({ session }: { session: SessionInfo }) => {
             size="sm" 
             disabled={busy} 
             onClick={() => run(() => pairSession(session.id))}
-            className="text-xs font-bold gap-1.5"
+            className="rounded-full px-4 text-xs font-semibold gap-1.5 shadow-sm transition-all duration-150 active:scale-95"
           >
             {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <QrCode className="h-3.5 w-3.5" />}
             Reconectar

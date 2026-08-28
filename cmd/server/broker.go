@@ -371,3 +371,10 @@ func (b *Broker) serveSSESession(w http.ResponseWriter, r *http.Request, clientI
 		}
 	}
 }
+
+func (b *Broker) ActiveCallCount() int {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	return len(b.calls)
+}
+
