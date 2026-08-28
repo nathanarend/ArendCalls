@@ -41,4 +41,7 @@
 - [x] Telemetria: Adicionar medição de CPU do processo ArendCalls (`cpuPercent`) no backend Go e no modal React.
 - [x] Validação: Bloquear auto-chamadas com suporte a 8 e 9 dígitos no Brasil no frontend (toast imediato) e backend (antes e pós `IsOnWhatsApp`).
 - [x] UI/UX: Implementar botões arredondados modernos para controle de sessão e histórico.
+- [x] Auditoria: Rever ausência de segredos ou dados sensíveis em hardcode no projeto.
+- [x] DockerHub: Compilar e publicar imagem `nathanarend/arendcalls:v2026.17` e `latest` no DockerHub.
+- [x] Git: Criar commit e tag `v2026.17` localmente.
 - [x] Testes: Validar suíte Go e build do React.
