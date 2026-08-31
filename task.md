@@ -42,6 +42,12 @@
 - [x] Validação: Bloquear auto-chamadas com suporte a 8 e 9 dígitos no Brasil no frontend (toast imediato) e backend (antes e pós `IsOnWhatsApp`).
 - [x] UI/UX: Implementar botões arredondados modernos para controle de sessão e histórico.
 - [x] Auditoria: Rever ausência de segredos ou dados sensíveis em hardcode no projeto.
-- [x] DockerHub: Compilar e publicar imagem `nathanarend/arendcalls:v2026.17` e `latest` no DockerHub.
-- [x] Git: Criar commit e tag `v2026.17` localmente.
-- [x] Testes: Validar suíte Go e build do React.
+- [x] Backend: Corrigir envio de encerramento/recusa de chamada (`EndCall` e `RejectCall` em `callmanager.go`) trocando `Query` por `SendNode` para evitar travamento síncrono por falta de ACK da Meta.
+- [x] DockerHub: Recompilar e republicar imagem `nathanarend/arendcalls:v2026.18` e `latest` com o fix de `SendNode`.
+- [x] Auditoria & Git: Auditado código sem segredos e criado commit local + tag `v2026.18`.
+- [/] GitHub: Push da branch `main` e tag `v2026.18` para o GitHub.
+
+
+
+
+

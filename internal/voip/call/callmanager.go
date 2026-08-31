@@ -47,7 +47,8 @@ type CallManager struct {
 	OnStateChange func(*CallInfo)
 	OnIncoming    func(*CallInfo)
 	OnEnded       func(*CallInfo)
-	OnPeerAudio   func([]float32)
+	OnPeerAudio      func([]float32)
+	OnRelayConnected func() // disparado quando o primeiro relay de mídia conecta
 }
 
 func NewCallManager(sock core.VoipSocket, log *slog.Logger) *CallManager {
@@ -204,7 +205,7 @@ func (m *CallManager) RejectCall(ctx context.Context, callID string, reason core
 
 	sendCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	if _, err := m.sock.Query(sendCtx, node); err != nil {
+	if err := m.sock.SendNode(sendCtx, node); err != nil {
 		m.log.Warn("failed to send call reject stanza", "call_id", callID, "err", err)
 	}
 
@@ -227,7 +228,7 @@ func (m *CallManager) EndCall(ctx context.Context, reason core.EndCallReason) er
 
 	sendCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	if _, err := m.sock.Query(sendCtx, node); err != nil {
+	if err := m.sock.SendNode(sendCtx, node); err != nil {
 		m.log.Warn("failed to send call terminate stanza", "call_id", call.CallID, "err", err)
 	}
 

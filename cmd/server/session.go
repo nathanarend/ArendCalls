@@ -121,8 +121,15 @@ func (s *Session) wireCall(cm *call.CallManager, callID string) {
 		if timeoutTimer != nil {
 			timeoutTimer.Stop()
 		}
-		timeoutTimer = time.AfterFunc(60*time.Second, func() {
-			s.log.Info("call ringing timeout reached (60s), ending stale call", "call_id", callID)
+		timeoutTimer = time.AfterFunc(90*time.Second, func() {
+			// Antes de encerrar, verificar se a chamada já está ativa em outra sessão.
+			// Isso evita que sessões-espelho (multi-device) derrubem chamadas legítimas.
+			if s.mgr.broker.isCallConnected(callID) {
+				s.log.Info("call ringing timeout: call already active in broker, skipping EndCall", "call_id", callID)
+				s.removeCall(callID)
+				return
+			}
+			s.log.Info("call ringing timeout reached (90s), ending stale call", "call_id", callID)
 			_ = cm.EndCall(context.Background(), core.EndCallReason("timeout"))
 		})
 	}
@@ -178,6 +185,13 @@ func (s *Session) wireCall(cm *call.CallManager, callID string) {
 			return
 		}
 		_ = ac.bridge.WritePCM(pcm16)
+	}
+	// Cancela o timer anti-zombie quando o relay de mídia conecta.
+	// Crucial para sessões-espelho (multi-device) que ficam em IncomingRinging
+	// enquanto outra sessão já aceitou a chamada — sem isso o timer derruba a ligação.
+	cm.OnRelayConnected = func() {
+		s.log.Info("relay connected: cancelling ringing timeout", "call_id", callID)
+		stopTimeout()
 	}
 }
 

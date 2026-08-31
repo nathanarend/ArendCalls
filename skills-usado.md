@@ -9,3 +9,8 @@
 - Desenvolvimento de interface reativa em React com ciclo de vida atrelado ao estado de visibilidade de modais, garantindo cancelamento de polling ao fechar.
 - Análise de profiling de CPU no codec MLow (FFT trigonometria e twiddle tables) e engenharia de áudio para Jitter Buffer em AudioWorklet.
 - Cálculo de amostragem diferencial de tempo de CPU por processo via `/proc/self/stat` (`utime` + `stime`) no Linux.
+- Resolução de concorrência de sinalização em WhatsApp Multi-Device (desativação de timers anti-zombie ao conectar DataChannel WebRTC em instâncias espelho e verificação global de estado de chamada no `broker`).
+- Correção no protocolo de sinalização WhatsApp VoIP: uso de `m.sock.SendNode` para stanzas assíncronas de terminate e reject (`<call><terminate/></call>` e `<call><reject/></call>`), evitando o bloqueio por timeout do `m.sock.Query`.
+- Compilação e publicação multi-stage de imagem Docker `nathanarend/arendcalls:v2026.18` e `latest` no DockerHub.
+
+

@@ -30,7 +30,13 @@ func (m *CallManager) onRelayConnected() {
 			m.log.Info("relay connected → active", "call_id", call.CallID)
 		}
 	}
+	cb := m.OnRelayConnected
 	m.mu.Unlock()
+	// Notifica wireCall para cancelar o timer anti-zombie mesmo em sessões-espelho
+	// (IncomingRinging que nunca foram aceitas localmente mas onde o relay conectou).
+	if cb != nil {
+		cb()
+	}
 }
 
 func buildRelayConfigs(endpoints []core.RelayEndpoint) []transport.RelayConfig {

@@ -193,6 +193,18 @@ func (b *Broker) getCall(id string) (*CallRecord, bool) {
 	return &cp, true
 }
 
+// isCallConnected retorna true se a chamada existe no broker com status connected/active.
+// Usado para evitar que sessões-espelho (multi-device) derrubem chamadas legítimas via timeout.
+func (b *Broker) isCallConnected(id string) bool {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	c, ok := b.calls[id]
+	if !ok {
+		return false
+	}
+	return c.Status == StatusConnected
+}
+
 func (b *Broker) setOwner(id, owner string) bool {
 	b.mu.Lock()
 	defer b.mu.Unlock()

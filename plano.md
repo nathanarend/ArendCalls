@@ -27,7 +27,15 @@ Para garantir que o status avance corretamente de "Ligando..." para "Chamando...
   - Backend: endpoint `GET /api/system/metrics` lendo métricas instantâneas (RAM do processo, RAM da VPS, CPU Load, Goroutines, Uptime, Disco e Chamadas ativas) sem overhead e sem persistência em banco.
   - Frontend: botão sutil no cabeçalho/sidebar com modal dinâmico que ativa polling de 2s somente quando aberto e encerra imediatamente ao fechar.
   - Testes e validação local com build e inicialização do servidor (Concluído).
-- Otimização de Performance, Eliminação de Cortes de Áudio, Correção de Desligamento e Chamadas Zumbis:
+- Otimização de Performance, Eliminação de Cortes de Áudio, Correção de Desligamento e Chamadas Zumbis (Concluído).
+- Correção de Queda de Chamadas em ~60s em WhatsApp Multi-Device:
+  - Adicionado callback `OnRelayConnected` no `CallManager` para cancelar o timer anti-zombie imediatamente quando a mídia conectar, mesmo em sessões-espelho (`IncomingRinging`).
+  - Aumentado timeout de ringing de 60s para 90s em `session.go`.
+  - Adicionada verificação `isCallConnected(callID)` no broker para evitar envio indevido de `EndCall` caso outra sessão do mesmo WhatsApp já tenha atendido.
+  - Correção Crítica no `EndCall` e `RejectCall`: substituição do método `m.sock.Query` por `m.sock.SendNode` ao enviar stanzas de terminate e reject. `Query` aguardava um ACK de confirmação que o WhatsApp não envia para estes pacotes, causando timeout de 3s e travamento do desligamento no remoto.
+  - Auditoria de segurança concluída (zero senhas, chaves ou dados sensíveis nos arquivos alterados/criados).
+  - Commit e tag anotada `v2026.18` gerados localmente.
+
   - Correção Crítica no `EndCall`/`RejectCall`: enviar stanzas de encerramento (`terminate`/`reject`) de forma síncrona com `context.WithTimeout` desacoplado da requisição HTTP antes de `cleanupMedia()`, garantindo que o WhatsApp remoto desligue imediatamente (Concluído).
   - Correção de Chamadas Travadas/Zumbis: resolução de JID/LID em eventos `CallTerminate`/`CallReject`, timeouts automáticos de chamada (60s) e encerramento ao fechar os Relays ICE (Concluído).
   - Otimização do Codec MLow (Go): implementar tabelas twiddle pré-computadas e scratch no `fft.go` (redução de 65% no uso de CPU e eliminação de alocações na hot path) (Concluído).
