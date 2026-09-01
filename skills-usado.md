@@ -12,5 +12,7 @@
 - Resolução de concorrência de sinalização em WhatsApp Multi-Device (desativação de timers anti-zombie ao conectar DataChannel WebRTC em instâncias espelho e verificação global de estado de chamada no `broker`).
 - Correção no protocolo de sinalização WhatsApp VoIP: uso de `m.sock.SendNode` para stanzas assíncronas de terminate e reject (`<call><terminate/></call>` e `<call><reject/></call>`), evitando o bloqueio por timeout do `m.sock.Query`.
 - Compilação e publicação multi-stage de imagem Docker `nathanarend/arendcalls:v2026.18` e `latest` no DockerHub.
-
-
+- Versionamento Semântico e documentação de Release Notes (`RELEASE_NOTES-v2026.18.md`) para publicação da tag `v2026.18` no GitHub.
+- Tratamento de falhas transitórias em sinalização VoIP: implementação de retentativas com intervalo (exponential backoff / retry) e propagação correta de status HTTP (`404` para inexistente, `502` para falha de envio de sinalização, `204/200` para sucesso).
+- Resolução de conflitos de concorrência em ambiente multi-operador com validação de `X-Client-Id` obrigatório em endpoints de claim/accept.
+- Robustez e resiliência na máquina de estados de chamadas do WhatsApp: idempotência em `TransitionRemoteAccepted` e resolução de JID com fallback para pacotes `CallAccept` sem `call-id` explícito.

@@ -1,6 +1,8 @@
 package main
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"os"
@@ -438,11 +440,13 @@ func (s *server) doAccept(sess *Session, w http.ResponseWriter, r *http.Request)
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no such call"})
 		return
 	}
-	owner := clientID(r)
-	if other := s.broker.ownerActiveCall(owner); other != "" && other != id {
-		writeJSON(w, http.StatusConflict, map[string]string{"error": "operator already on a call"})
-		return
-	}
+	// O servidor gera sempre um identificador único de claim interno.
+	// A primeira requisição a chegar assume e tranca a chamada;
+	// qualquer requisição simultânea ou concorrente seguinte receberá 409 Conflict.
+	b := make([]byte, 8)
+	_, _ = rand.Read(b)
+	owner := "claim-" + hex.EncodeToString(b)
+
 	if !s.broker.setOwner(id, owner) {
 		writeJSON(w, http.StatusConflict, map[string]string{"error": "claimed by another client"})
 		return
@@ -464,8 +468,13 @@ func (s *server) doReject(sess *Session, w http.ResponseWriter, r *http.Request)
 			ac, ok = sess.reg.get(id)
 		}
 	}
-	if ok {
-		_ = ac.cm.RejectCall(r.Context(), id, core.EndCallReasonDeclined)
+	if !ok {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no such call"})
+		return
+	}
+	if err := ac.cm.RejectCall(r.Context(), id, core.EndCallReasonDeclined); err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "failed to send reject: " + err.Error()})
+		return
 	}
 	sess.removeCall(id)
 	s.broker.endCall(id, string(core.EndCallReasonDeclined))
@@ -481,8 +490,13 @@ func (s *server) doEndCall(sess *Session, w http.ResponseWriter, r *http.Request
 			ac, ok = sess.reg.get(id)
 		}
 	}
-	if ok {
-		_ = ac.cm.EndCall(r.Context(), core.EndCallReasonUserEnded)
+	if !ok {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no such call"})
+		return
+	}
+	if err := ac.cm.EndCall(r.Context(), core.EndCallReasonUserEnded); err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "failed to send terminate: " + err.Error()})
+		return
 	}
 	sess.removeCall(id)
 	s.broker.endCall(id, string(core.EndCallReasonUserEnded))

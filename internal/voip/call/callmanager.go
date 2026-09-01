@@ -203,14 +203,28 @@ func (m *CallManager) RejectCall(ctx context.Context, callID string, reason core
 	m.emitState()
 	m.mu.Unlock()
 
+	// Tentativa 1
 	sendCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
-	if err := m.sock.SendNode(sendCtx, node); err != nil {
-		m.log.Warn("failed to send call reject stanza", "call_id", callID, "err", err)
+	err := m.sock.SendNode(sendCtx, node)
+	cancel()
+
+	var sendErr error
+	if err != nil {
+		m.log.Warn("failed to send call reject stanza (attempt 1/2)", "call_id", callID, "err", err)
+		// Aguarda 500ms e tenta novamente — cobre o caso mais comum de socket em reconexão
+		time.Sleep(500 * time.Millisecond)
+		sendCtx2, cancel2 := context.WithTimeout(context.Background(), 3*time.Second)
+		err2 := m.sock.SendNode(sendCtx2, node)
+		cancel2()
+		if err2 != nil {
+			m.log.Error("failed to send call reject stanza (attempt 2/2)", "call_id", callID, "err", err2)
+			sendErr = err2
+		}
 	}
 
+	// A mídia é sempre limpa — não é possível manter a chamada viva sem sinalização.
 	m.cleanupMedia()
-	return nil
+	return sendErr
 }
 
 func (m *CallManager) EndCall(ctx context.Context, reason core.EndCallReason) error {
@@ -226,17 +240,31 @@ func (m *CallManager) EndCall(ctx context.Context, reason core.EndCallReason) er
 	m.emitState()
 	m.mu.Unlock()
 
+	// Tentativa 1
 	sendCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
-	if err := m.sock.SendNode(sendCtx, node); err != nil {
-		m.log.Warn("failed to send call terminate stanza", "call_id", call.CallID, "err", err)
+	err := m.sock.SendNode(sendCtx, node)
+	cancel()
+
+	var sendErr error
+	if err != nil {
+		m.log.Warn("failed to send call terminate stanza (attempt 1/2)", "call_id", call.CallID, "err", err)
+		// Aguarda 500ms e tenta novamente — cobre o caso mais comum de socket em reconexão
+		time.Sleep(500 * time.Millisecond)
+		sendCtx2, cancel2 := context.WithTimeout(context.Background(), 3*time.Second)
+		err2 := m.sock.SendNode(sendCtx2, node)
+		cancel2()
+		if err2 != nil {
+			m.log.Error("failed to send call terminate stanza (attempt 2/2)", "call_id", call.CallID, "err", err2)
+			sendErr = err2
+		}
 	}
 
 	if m.OnEnded != nil {
 		m.OnEnded(ended)
 	}
+	// A mídia é sempre limpa — não é possível manter a chamada viva sem sinalização.
 	m.cleanupMedia()
-	return nil
+	return sendErr
 }
 
 func (m *CallManager) ownCredJid() string {

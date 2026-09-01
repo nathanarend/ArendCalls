@@ -141,7 +141,15 @@ func (c *CallInfo) ApplyTransition(t Transition) error {
 		s.Silenced = t.Silenced
 
 	case TransitionRemoteAccepted:
-		if s.State != core.CallStateRinging && s.State != core.CallStateInitiating {
+		// Aceita de qualquer estado pré-ativo — cobre: accept duplicado (já Connecting),
+		// multi-device (IncomingRinging) e chegada fora de ordem (Initiating/Ringing).
+		switch s.State {
+		case core.CallStateConnecting:
+			// Idempotente: accept duplicado, mantém Connecting sem alterar AcceptedAt.
+			return nil
+		case core.CallStateRinging, core.CallStateInitiating, core.CallStateIncomingRinging:
+			// Caminho normal.
+		default:
 			return &InvalidTransition{string(s.State), t.Type}
 		}
 		s.State = core.CallStateConnecting

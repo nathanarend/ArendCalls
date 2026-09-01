@@ -45,9 +45,19 @@
 - [x] Backend: Corrigir envio de encerramento/recusa de chamada (`EndCall` e `RejectCall` em `callmanager.go`) trocando `Query` por `SendNode` para evitar travamento síncrono por falta de ACK da Meta.
 - [x] DockerHub: Recompilar e republicar imagem `nathanarend/arendcalls:v2026.18` e `latest` com o fix de `SendNode`.
 - [x] Auditoria & Git: Auditado código sem segredos e criado commit local + tag `v2026.18`.
-- [/] GitHub: Push da branch `main` e tag `v2026.18` para o GitHub.
-
-
-
-
+- [x] GitHub: Push da branch `main` e tag `v2026.18` realizado com sucesso no repositório remoto.
+- [x] Release: Criado arquivo `RELEASE_NOTES-v2026.18.md` com as notas de lançamento da tag `v2026.18`.
+- [x] Backend: Corrigir `EndCall` em `callmanager.go` — retentativa com 500ms de intervalo (2 tentativas) e retorno do erro em vez de nil, para que falhas de socket (socket em reconexão) não sejam silenciosas.
+- [x] Backend: Corrigir `doEndCall` em `httpapi.go` — 404 quando chamada não existe, 502 quando `EndCall` falha, 204 apenas no sucesso real; `removeCall` e `broker.endCall` movidos para dentro do caminho de sucesso.
+- [x] Documentação: Criado `infra/arendcalls/PATCH-endcall.md` com análise, diffs e guia de validação em produção.
+- [x] Backend: Corrigir `RejectCall` em `callmanager.go` — retentativa com 500ms de intervalo (2 tentativas) e retorno do erro, alinhando com o comportamento do `EndCall`.
+- [x] Backend: Corrigir `doReject` em `httpapi.go` — 404 quando chamada não existe, 502 quando `RejectCall` falha, `removeCall` e `broker.endCall` movidos para dentro do caminho de sucesso.
+- [x] Bug: Corrigir chamada atendida no celular que continuava "tocando" no painel por 90s.
+  - `session.go`: `CallAccept` agora tem fallback por peer JID (igual a `CallTerminate`) — evita accept descartado quando evt.Data não traz call-id.
+  - `callmanager_signaling.go`: `HandleCallAccept` não retorna mais quando `info==nil`; faz a transição de estado mesmo sem dados estruturados; loga erro de transição em vez de descartar com `_`.
+  - `callstate.go`: `TransitionRemoteAccepted` aceita `Connecting` (idempotente), `IncomingRinging` (multi-device) e loga quando falha.
+  - `httpapi_test.go`: Testes atualizados para esperar 404 em vez de 200/204 para chamadas inexistentes.
+- [x] Backend: Exclusividade contra atendimento simultâneo gerenciada 100% internamente no `/accept` de forma transparente.
+- [x] Auditoria de Segurança: Verificação completa de código, commits e arquivos não rastreados (zero credenciais ou segredos expostos).
+- [x] Documentação de Release: Criado arquivo `RELEASE_NOTES-v2026.19.md` para publicação no GitHub Releases da tag `v2026.19`.
 

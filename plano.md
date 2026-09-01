@@ -34,7 +34,8 @@ Para garantir que o status avance corretamente de "Ligando..." para "Chamando...
   - Adicionada verificação `isCallConnected(callID)` no broker para evitar envio indevido de `EndCall` caso outra sessão do mesmo WhatsApp já tenha atendido.
   - Correção Crítica no `EndCall` e `RejectCall`: substituição do método `m.sock.Query` por `m.sock.SendNode` ao enviar stanzas de terminate e reject. `Query` aguardava um ACK de confirmação que o WhatsApp não envia para estes pacotes, causando timeout de 3s e travamento do desligamento no remoto.
   - Auditoria de segurança concluída (zero senhas, chaves ou dados sensíveis nos arquivos alterados/criados).
-  - Commit e tag anotada `v2026.18` gerados localmente.
+  - Commit e tag anotada `v2026.18` gerados localmente e subidos ao GitHub remoto com sucesso.
+  - Criadas as notas de lançamento em `RELEASE_NOTES-v2026.18.md` para publicação do Release `v2026.18`.
 
   - Correção Crítica no `EndCall`/`RejectCall`: enviar stanzas de encerramento (`terminate`/`reject`) de forma síncrona com `context.WithTimeout` desacoplado da requisição HTTP antes de `cleanupMedia()`, garantindo que o WhatsApp remoto desligue imediatamente (Concluído).
   - Correção de Chamadas Travadas/Zumbis: resolução de JID/LID em eventos `CallTerminate`/`CallReject`, timeouts automáticos de chamada (60s) e encerramento ao fechar os Relays ICE (Concluído).
@@ -45,3 +46,14 @@ Para garantir que o status avance corretamente de "Ligando..." para "Chamando...
   - Bloqueio de Auto-Chamada Inteligente: suporte completo ao 9º dígito brasileiro (comparação de DDD + 8 dígitos finais) tanto no Frontend (bloqueio imediato com toast) quanto no Backend antes e após a resolução de JID canônico da Meta (Concluído).
   - UI/UX: Design moderno e arredondado (`rounded-full`) para os botões de ação da sessão (Ligar, Parar, Reiniciar, Desconectar e Histórico) com micro-interações (Concluído).
   - Release & Publicação: Auditoria completa de segurança (zero dados sensíveis ou segredos em hardcode), geração e publicação da nova imagem Docker `nathanarend/arendcalls:v2026.17` e `nathanarend/arendcalls:latest` no DockerHub e criação de tag Git `v2026.17` (Concluído).
+
+## Correções Críticas de Sinalização e Multi-Operador (v2026.19)
+- **Correção de Desligamento / Encerramento Silencioso (`EndCall` e `RejectCall`)**:
+  - `internal/voip/call/callmanager.go`: Implementada retentativa automática (2 tentativas com 500ms de intervalo) para envio de stanzas de terminate e reject caso o socket esteja reconectando. Retorno do erro real em vez de `nil` silencioso.
+  - `cmd/server/httpapi.go`: `doEndCall` e `doReject` agora retornam `404 Not Found` quando a chamada não existe, `502 Bad Gateway` se o stanza falhar no socket, e `204/200` apenas no sucesso real, garantindo feedback consistente ao CRM/TalkDash.
+- **Correção de Chamada Atendida no Celular que Continuava Tocando no Painel (90s)**:
+  - `cmd/server/session.go`: Adicionado fallback por peer JID (com resolução `@lid` -> `@s.whatsapp.net`) em `CallAccept` quando o pacote não traz `call-id` explícito, alinhando com o comportamento de `CallTerminate`.
+  - `internal/voip/call/callmanager_signaling.go`: `HandleCallAccept` não descarta mais eventos quando `info == nil` (protocolos alternativos/simplificados), executando a transição de estado.
+  - `internal/voip/call/callstate.go`: `TransitionRemoteAccepted` agora é idempotente para o estado `Connecting` e aceita transições a partir de `IncomingRinging`.
+- **Exclusividade Automática contra Atendimento Duplo**:
+  - `cmd/server/httpapi.go`: `/api/sessions/{sid}/calls/{id}/accept` agora gera internamente um identificador único de claim para cada requisição de atendimento. A primeira requisição que chega tranca a chamada exclusivamente e qualquer tentativa concorrente simultânea recebe `409 Conflict` (*"claimed by another client"*), de forma 100% transparente para as aplicações externas e CRMs.

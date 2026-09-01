@@ -272,8 +272,25 @@ func (s *Session) handleEvent(rawEvt any) {
 	case *events.CallOffer:
 		s.onIncomingOffer(ctx, evt)
 	case *events.CallAccept:
+		node := wrapCall(evt.From, evt.Data)
 		if ac, ok := s.callForEvent(evt.From, evt.Data); ok {
-			ac.cm.HandleCallAccept(ctx, wrapCall(evt.From, evt.Data), evt.From)
+			ac.cm.HandleCallAccept(ctx, node, evt.From)
+		} else {
+			// Fallback: busca pelo JID do peer — cobre o caso em que evt.Data
+			// é nil ou não carrega o call-id (igual ao tratamento de CallTerminate).
+			peerJID := evt.From
+			if peerJID.Server == "lid" {
+				if pn, err := s.client.Store.LIDs.GetPNForLID(context.Background(), peerJID); err == nil && !pn.IsEmpty() {
+					peerJID = pn
+				}
+			}
+			if ac, ok := s.reg.getByPeer(peerJID); ok {
+				ac.cm.HandleCallAccept(ctx, node, evt.From)
+			} else if ac, ok := s.reg.getByPeer(evt.From); ok {
+				ac.cm.HandleCallAccept(ctx, node, evt.From)
+			} else {
+				s.log.Warn("CallAccept: chamada não encontrada por callId nem por peer", "from", evt.From)
+			}
 		}
 	case *events.CallTransport:
 		if ac, ok := s.callForEvent(evt.From, evt.Data); ok {
