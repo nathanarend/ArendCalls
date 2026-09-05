@@ -34,6 +34,9 @@ func (s *server) routes() http.Handler {
 	mux.HandleFunc("DELETE /api/sessions/{sid}/calls/{id}", s.handleEndCall)
 	mux.HandleFunc("GET /api/sessions/{sid}/history", s.handleHistory)
 	mux.HandleFunc("POST /api/sessions/{sid}/check-number", s.handleCheckNumber)
+	mux.HandleFunc("GET /api/sessions/{sid}/recording-config", s.handleGetRecordingConfig)
+	mux.HandleFunc("PATCH /api/sessions/{sid}/recording-config", s.handleSetRecordingConfig)
+	mux.HandleFunc("GET /api/sessions/{sid}/calls/{id}/recording-info", s.handleRecordingInfo)
 
 	mux.HandleFunc("GET /api/events", s.handleEvents)
 	mux.HandleFunc("GET /api/system/metrics", s.handleSystemMetrics)

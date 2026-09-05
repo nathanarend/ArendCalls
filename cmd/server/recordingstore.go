@@ -11,9 +11,9 @@ type RecordingStatus string
 
 const (
 	RecStatusRecording RecordingStatus = "recording"
-	RecStatusUploading  RecordingStatus = "uploading"
-	RecStatusReady      RecordingStatus = "ready"
-	RecStatusFailed     RecordingStatus = "failed"
+	RecStatusUploading RecordingStatus = "uploading"
+	RecStatusReady     RecordingStatus = "ready"
+	RecStatusFailed    RecordingStatus = "failed"
 )
 
 // RecordingRow is one row of the call_recordings table. It survives restarts so
@@ -36,6 +36,7 @@ type RecordingRow struct {
 	UploadAttempts int
 	NotifyAttempts int
 	NotifiedAt     int64 // unix ms, 0 until Mocho acked
+	LastAttemptAt  int64 // unix ms of the last upload/notify try
 	CreatedAt      int64
 }
 
@@ -60,6 +61,7 @@ func newRecordingStore(ctx context.Context, db *sql.DB) (*recordingStore, error)
 		upload_attempts INTEGER DEFAULT 0,
 		notify_attempts INTEGER DEFAULT 0,
 		notified_at     INTEGER DEFAULT 0,
+		last_attempt_at INTEGER DEFAULT 0,
 		created_at      INTEGER
 	)`)
 	if err != nil {
@@ -200,13 +202,15 @@ func (s *recordingStore) markUploaded(ctx context.Context, callID, b2Key, b2URL 
 
 func (s *recordingStore) incUploadAttempts(ctx context.Context, callID string) error {
 	_, err := s.db.ExecContext(ctx, `UPDATE call_recordings
-		SET upload_attempts = upload_attempts + 1 WHERE call_id=?`, callID)
+		SET upload_attempts = upload_attempts + 1, last_attempt_at = ? WHERE call_id=?`,
+		time.Now().UnixMilli(), callID)
 	return err
 }
 
 func (s *recordingStore) incNotifyAttempts(ctx context.Context, callID string) error {
 	_, err := s.db.ExecContext(ctx, `UPDATE call_recordings
-		SET notify_attempts = notify_attempts + 1 WHERE call_id=?`, callID)
+		SET notify_attempts = notify_attempts + 1, last_attempt_at = ? WHERE call_id=?`,
+		time.Now().UnixMilli(), callID)
 	return err
 }
 
@@ -218,7 +222,11 @@ func (s *recordingStore) markNotified(ctx context.Context, callID string) error 
 
 func (s *recordingStore) get(ctx context.Context, callID string) (*RecordingRow, error) {
 	row := s.db.QueryRowContext(ctx, recordingSelectCols+` WHERE call_id=?`, callID)
-	return scanRecording(row)
+	r, err := scanRecording(row)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	return r, err
 }
 
 // pendingHandoff returns recordings that still need work: local captures that
@@ -256,7 +264,7 @@ func (s *recordingStore) reapStaleRecording(ctx context.Context) error {
 const recordingSelectCols = `SELECT call_id, session_id, COALESCE(clinic_id,''), status,
 	COALESCE(local_path,''), COALESCE(b2_key,''), COALESCE(b2_url,''), duration_ms,
 	COALESCE(channels,''), COALESCE(direction,''), COALESCE(peer,''), started_at, ended_at,
-	COALESCE(error,''), upload_attempts, notify_attempts, notified_at, created_at
+	COALESCE(error,''), upload_attempts, notify_attempts, notified_at, last_attempt_at, created_at
 	FROM call_recordings`
 
 type scannable interface {
@@ -268,7 +276,7 @@ func scanRecording(sc scannable) (*RecordingRow, error) {
 	var status string
 	err := sc.Scan(&r.CallID, &r.SessionID, &r.ClinicID, &status, &r.LocalPath, &r.B2Key,
 		&r.B2URL, &r.DurationMs, &r.Channels, &r.Direction, &r.Peer, &r.StartedAt, &r.EndedAt,
-		&r.Err, &r.UploadAttempts, &r.NotifyAttempts, &r.NotifiedAt, &r.CreatedAt)
+		&r.Err, &r.UploadAttempts, &r.NotifyAttempts, &r.NotifiedAt, &r.LastAttemptAt, &r.CreatedAt)
 	if err != nil {
 		return nil, err
 	}

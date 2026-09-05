@@ -40,8 +40,9 @@ type recordingController struct {
 	dir     string
 	log     *slog.Logger
 
-	mu   sync.Mutex
-	live map[string]*liveRecording
+	mu        sync.Mutex
+	live      map[string]*liveRecording
+	retryOnce sync.Once
 }
 
 func newRecordingController(ctx context.Context, store *recordingStore, secrets *secretBox, dir string, log *slog.Logger) *recordingController {

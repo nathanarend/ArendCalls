@@ -23,8 +23,12 @@ type secretBox struct {
 	aead cipher.AEAD // nil => pass-through
 }
 
-type secretEncryptor interface{ Encrypt(plain string) (string, error) }
-type secretDecryptor interface{ Decrypt(stored string) (string, error) }
+type secretEncryptor interface {
+	Encrypt(plain string) (string, error)
+}
+type secretDecryptor interface {
+	Decrypt(stored string) (string, error)
+}
 
 const encPrefix = "enc:v1:"
 

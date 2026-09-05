@@ -83,10 +83,10 @@ func newServer(ctx context.Context, dbPath, staticDir, apiKey, recDir string, ma
 		maxCalls:   maxCalls,
 		log:        log,
 		waLogger:   waLogger,
-		sessions:  mgr,
-		broker:    broker,
-		recStore:  recStore,
-		rec:       rec,
-		startTime: time.Now(),
+		sessions:   mgr,
+		broker:     broker,
+		recStore:   recStore,
+		rec:        rec,
+		startTime:  time.Now(),
 	}, nil
 }
