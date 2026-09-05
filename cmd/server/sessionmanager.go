@@ -18,6 +18,7 @@ type SessionManager struct {
 	container *sqlstore.Container
 	broker    *Broker
 	store     *sessionStore
+	rec       *recordingController
 	waLogger  waLog.Logger
 	log       *slog.Logger
 	maxCalls  int

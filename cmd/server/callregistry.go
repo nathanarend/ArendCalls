@@ -2,8 +2,10 @@ package main
 
 import (
 	"sync"
+	"sync/atomic"
 
 	"wacalls/internal/voip/call"
+	"wacalls/internal/voip/recording"
 	"wacalls/internal/voip/wanode"
 
 	"go.mau.fi/whatsmeow/types"
@@ -12,6 +14,9 @@ import (
 type activeCall struct {
 	cm     *call.CallManager
 	bridge *Bridge
+	// rec is the live call recorder, set once media connects when the call is
+	// armed for recording. Loaded lock-free on the audio hot path.
+	rec atomic.Pointer[recording.Recorder]
 }
 
 type callRegistry struct {

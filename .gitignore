@@ -14,6 +14,7 @@ wacalls.db
 *.db-shm
 /auth/
 /data/
+/recordings/
 client/node_modules/
 client/dist/
 client/.vite/
@@ -42,10 +43,10 @@ Thumbs.db
 .env.*
 !.env.example
 
-# Binaries generated
-arendcalls_bin
-bridge
-server
+# Binaries generated (repo-root only — must not shadow cmd/server/*.go)
+/arendcalls_bin
+/bridge
+/server
 
 # Keys and certificates
 *.pem

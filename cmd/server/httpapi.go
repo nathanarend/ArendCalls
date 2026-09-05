@@ -324,6 +324,7 @@ func (s *server) doStartCall(sess *Session, w http.ResponseWriter, r *http.Reque
 		Phone      string `json:"phone"`
 		DurationMs int    `json:"duration_ms"`
 		Record     bool   `json:"record"`
+		ClinicID   string `json:"clinicId"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || strings.TrimSpace(body.Phone) == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "phone required"})
@@ -371,6 +372,20 @@ func (s *server) doStartCall(sess *Session, w http.ResponseWriter, r *http.Reque
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	if rec := sess.mgr.rec; rec != nil {
+		var explicit *bool
+		if body.Record {
+			v := true
+			explicit = &v
+		}
+		if rec.wantRecording(sess.id, explicit) {
+			rec.arm(recMeta{
+				callID: callID, sessionID: sess.id, clinicID: strings.TrimSpace(body.ClinicID),
+				direction: "outbound", peer: peer.String(),
+			})
+		}
+	}
+
 	existing, _ := s.broker.getCall(callID)
 	status := StatusStarting
 	startedAt := time.Now().UnixMilli()
@@ -413,6 +428,9 @@ func (s *server) doWebRTC(sess *Session, w http.ResponseWriter, r *http.Request)
 
 	bridge.OnBrowserPCM = func(pcm []float32) {
 		ac.cm.FeedCapturedPCM(pcm)
+		if r := ac.rec.Load(); r != nil {
+			r.WriteOperator(pcm)
+		}
 	}
 	bridge.OnTerminalICE = func() {
 		if cur, ok := sess.reg.get(callID); ok && cur.bridge == bridge {

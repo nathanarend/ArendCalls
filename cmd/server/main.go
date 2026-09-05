@@ -19,6 +19,7 @@ func main() {
 	debug := flag.Bool("debug", false, "Enable debug logging")
 	maxCalls := flag.Int("max-calls", 0, "Max concurrent calls per session (0 = unlimited)")
 	apiKeyFlag := flag.String("apikey", "", "Global API Key for admin access (overrides API_KEY env var)")
+	recDir := flag.String("recordings-dir", "recordings", "Directory for server-side call recordings")
 	flag.Parse()
 
 	logLevel := slog.LevelInfo
@@ -35,12 +36,14 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
-	srv, err := newServer(ctx, *dbPath, *staticDir, apiKey, *maxCalls, log)
+	srv, err := newServer(ctx, *dbPath, *staticDir, apiKey, *recDir, *maxCalls, log)
 	if err != nil {
 		log.Error("startup failed", "err", err)
 		os.Exit(1)
 	}
 	defer srv.sessions.disconnectAll()
+
+	srv.rec.resumePendingHandoffs()
 
 	if err := srv.sessions.Restore(ctx); err != nil {
 		log.Error("session restore failed", "err", err)

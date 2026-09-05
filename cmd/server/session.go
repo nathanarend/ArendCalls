@@ -144,11 +144,17 @@ func (s *Session) wireCall(cm *call.CallManager, callID string) {
 			SessionID: s.id, CallID: c.CallID, Direction: "inbound", Peer: peer, PeerName: peerName,
 			StartedAt: time.Now().UnixMilli(), Status: StatusRinging,
 		})
+		if s.mgr.rec != nil && s.mgr.rec.wantRecording(s.id, nil) {
+			s.mgr.rec.arm(recMeta{callID: c.CallID, sessionID: s.id, direction: "inbound", peer: peer})
+		}
 		s.mgr.broker.emitIncoming(s.id, c.CallID, peer, peerName)
 	}
 	cm.OnStateChange = func(c *call.CallInfo) {
 		if c.IsEnded() {
 			stopTimeout()
+			if s.mgr.rec != nil {
+				s.mgr.rec.onCallEnded(c.CallID)
+			}
 			s.removeCall(c.CallID)
 			s.mgr.broker.endCall(c.CallID, string(c.StateData.EndReason))
 			return
@@ -176,15 +182,23 @@ func (s *Session) wireCall(cm *call.CallManager, callID string) {
 	}
 	cm.OnEnded = func(c *call.CallInfo) {
 		stopTimeout()
+		if s.mgr.rec != nil {
+			s.mgr.rec.onCallEnded(c.CallID)
+		}
 		s.removeCall(c.CallID)
 		s.mgr.broker.endCall(c.CallID, string(c.StateData.EndReason))
 	}
 	cm.OnPeerAudio = func(pcm16 []float32) {
 		ac, ok := s.reg.get(callID)
-		if !ok || ac.bridge == nil {
+		if !ok {
 			return
 		}
-		_ = ac.bridge.WritePCM(pcm16)
+		if ac.bridge != nil {
+			_ = ac.bridge.WritePCM(pcm16)
+		}
+		if r := ac.rec.Load(); r != nil {
+			r.WritePeer(pcm16)
+		}
 	}
 	// Cancela o timer anti-zombie quando o relay de mídia conecta.
 	// Crucial para sessões-espelho (multi-device) que ficam em IncomingRinging
@@ -192,6 +206,13 @@ func (s *Session) wireCall(cm *call.CallManager, callID string) {
 	cm.OnRelayConnected = func() {
 		s.log.Info("relay connected: cancelling ringing timeout", "call_id", callID)
 		stopTimeout()
+		if s.mgr.rec != nil && s.mgr.rec.armed(callID) {
+			if ac, ok := s.reg.get(callID); ok {
+				if r := s.mgr.rec.onMediaConnected(callID); r != nil {
+					ac.rec.Store(r)
+				}
+			}
+		}
 	}
 }
 

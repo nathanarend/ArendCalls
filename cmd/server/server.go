@@ -24,6 +24,8 @@ type server struct {
 
 	sessions  *SessionManager
 	broker    *Broker
+	recStore  *recordingStore
+	rec       *recordingController
 	startTime time.Time
 }
 
@@ -37,7 +39,7 @@ func openDB(dbPath string) (*sql.DB, error) {
 	return db, nil
 }
 
-func newServer(ctx context.Context, dbPath, staticDir, apiKey string, maxCalls int, log *slog.Logger) (*server, error) {
+func newServer(ctx context.Context, dbPath, staticDir, apiKey, recDir string, maxCalls int, log *slog.Logger) (*server, error) {
 	db, err := openDB(dbPath)
 	if err != nil {
 		return nil, err
@@ -50,17 +52,25 @@ func newServer(ctx context.Context, dbPath, staticDir, apiKey string, maxCalls i
 	if err != nil {
 		return nil, err
 	}
+	recStore, err := newRecordingStore(ctx, db)
+	if err != nil {
+		return nil, err
+	}
 
 	waLogger := waLog.Noop
 	if log.Enabled(ctx, slog.LevelDebug) {
 		waLogger = waLog.Stdout("WA", "INFO", true)
 	}
 
+	secrets := newSecretBox(log)
+	rec := newRecordingController(ctx, recStore, secrets, recDir, log)
+
 	broker := NewBroker()
 	mgr := newSessionManager(ctx, container, broker, store, waLogger, log, maxCalls)
+	mgr.rec = rec
 	broker.SnapshotFn = mgr.snapshotEvents
 	broker.GetWebhookURLFn = mgr.getWebhookURL
-	
+
 	tokenBytes := make([]byte, 16)
 	rand.Read(tokenBytes)
 	adminToken := hex.EncodeToString(tokenBytes)
@@ -75,6 +85,8 @@ func newServer(ctx context.Context, dbPath, staticDir, apiKey string, maxCalls i
 		waLogger:   waLogger,
 		sessions:  mgr,
 		broker:    broker,
+		recStore:  recStore,
+		rec:       rec,
 		startTime: time.Now(),
 	}, nil
 }
