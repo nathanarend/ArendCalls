@@ -23,29 +23,8 @@ func newTestRecCtl(t *testing.T) (*recordingController, *recordingStore, string)
 	}
 	dir := t.TempDir()
 	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
-	ctl := newRecordingController(context.Background(), store, newSecretBox(log), dir, log)
+	ctl := newRecordingController(context.Background(), store, newSecretBox(log), dir, 2, log)
 	return ctl, store, dir
-}
-
-func TestRecordingControllerWantRecording(t *testing.T) {
-	ctl, store, _ := newTestRecCtl(t)
-
-	// No config row: default off.
-	if ctl.wantRecording("sess-1", nil) {
-		t.Error("expected recording off by default")
-	}
-	// Explicit true from the Mocho POST wins.
-	tru := true
-	if !ctl.wantRecording("sess-1", &tru) {
-		t.Error("explicit record=true should force recording")
-	}
-	// Per-session default on.
-	if err := store.saveConfig(context.Background(), RecordingConfig{SessionID: "sess-1", Enabled: true}, ctl.secrets); err != nil {
-		t.Fatal(err)
-	}
-	if !ctl.wantRecording("sess-1", nil) {
-		t.Error("session default should enable recording for inbound")
-	}
 }
 
 func TestRecordingControllerLifecycle(t *testing.T) {
@@ -58,41 +37,38 @@ func TestRecordingControllerLifecycle(t *testing.T) {
 		t.Fatal("call should be armed")
 	}
 
-	rec := ctl.onMediaConnected(callID)
+	rec := ctl.onAnswered(callID)
 	if rec == nil {
-		t.Fatal("onMediaConnected returned nil recorder")
+		t.Fatal("onAnswered returned nil recorder")
 	}
-	// Second call is a no-op and returns the same recorder.
-	if got := ctl.onMediaConnected(callID); got != rec {
-		t.Error("onMediaConnected should be idempotent")
+	if got := ctl.onAnswered(callID); got != rec {
+		t.Error("onAnswered should be idempotent")
 	}
 
 	frame := make([]float32, 320)
 	for i := range frame {
 		frame[i] = 0.3
 	}
-	for k := 0; k < 15; k++ {
+	for k := 0; k < 320; k++ { // ~6.4s of audio, over the 5s floor
 		rec.WriteOperator(frame)
 		rec.WritePeer(frame)
 		time.Sleep(20 * time.Millisecond)
 	}
 
 	ctl.onCallEnded(callID)
-	// onCallEnded fires the handoff in a goroutine; give it a beat.
-	time.Sleep(100 * time.Millisecond)
 
 	row, err := store.get(ctx, callID)
 	if err != nil || row == nil {
 		t.Fatalf("recording row missing: %v", err)
 	}
 	if row.Status != RecStatusUploading {
-		t.Errorf("status = %q, want uploading (no B2 config)", row.Status)
+		t.Errorf("status = %q, want uploading (queued, no B2 config)", row.Status)
 	}
 	if row.ClinicID != "clinic-9" {
 		t.Errorf("clinic id = %q", row.ClinicID)
 	}
-	if row.DurationMs < 200 {
-		t.Errorf("duration_ms = %d, want >=200", row.DurationMs)
+	if row.DurationMs < 5000 {
+		t.Errorf("duration_ms = %d, want >=5000", row.DurationMs)
 	}
 	if row.Channels != "stereo" {
 		t.Errorf("channels = %q", row.Channels)
@@ -109,29 +85,63 @@ func TestRecordingControllerLifecycle(t *testing.T) {
 	if filepath.Dir(filepath.Dir(row.LocalPath)) != wantPath {
 		t.Errorf("path layout = %q, want under %q/<month>/", row.LocalPath, wantPath)
 	}
-
 	if ctl.armed(callID) {
 		t.Error("call should be disarmed after end")
 	}
 }
 
-func TestRecordingControllerReapStale(t *testing.T) {
+func TestRecordingControllerSkipsShortCall(t *testing.T) {
 	ctl, store, _ := newTestRecCtl(t)
+	const callID = "call-short"
+	ctl.arm(recMeta{callID: callID, sessionID: "sess-1", direction: "outbound"})
+	rec := ctl.onAnswered(callID)
+	if rec == nil {
+		t.Fatal("onAnswered nil")
+	}
+	frame := make([]float32, 320)
+	for k := 0; k < 40; k++ { // ~0.8s — under the 5s floor
+		rec.WriteOperator(frame)
+		time.Sleep(20 * time.Millisecond)
+	}
+	started, _ := store.get(context.Background(), callID)
+	local := started.LocalPath
+	ctl.onCallEnded(callID)
+
+	row, _ := store.get(context.Background(), callID)
+	if row == nil || row.Status != RecStatusSkipped {
+		t.Fatalf("status = %v, want skipped", row)
+	}
+	if _, err := os.Stat(local); !os.IsNotExist(err) {
+		t.Error("short recording WAV should be deleted")
+	}
+}
+
+func TestRecordingControllerSalvagesOnRestart(t *testing.T) {
+	ctl, store, dir := newTestRecCtl(t)
 	ctx := context.Background()
 
-	if err := store.begin(ctx, RecordingRow{
-		CallID: "stale-1", SessionID: "s", LocalPath: "/x.wav", Channels: "stereo",
-		StartedAt: time.Now().UnixMilli(),
-	}); err != nil {
-		t.Fatal(err)
-	}
-	ctl.resumePendingHandoffs()
+	// A row left in "recording" with an intact WAV on disk must be salvaged,
+	// not failed.
+	goodPath := filepath.Join(dir, "sess-1", "2026-09", "good.wav")
+	_ = os.MkdirAll(filepath.Dir(goodPath), 0o755)
+	// 44-byte header + ~6s of stereo 16k audio (64000 B/s).
+	_ = os.WriteFile(goodPath, make([]byte, 44+64000*6), 0o644)
+	_ = store.begin(ctx, RecordingRow{CallID: "good", SessionID: "sess-1", LocalPath: goodPath, Channels: "stereo", StartedAt: time.Now().UnixMilli()})
 
-	row, err := store.get(ctx, "stale-1")
-	if err != nil {
-		t.Fatal(err)
+	// A row whose file is gone → failed.
+	_ = store.begin(ctx, RecordingRow{CallID: "gone", SessionID: "sess-1", LocalPath: "/nope/x.wav", Channels: "stereo", StartedAt: time.Now().UnixMilli()})
+
+	ctl.resumeOnBoot()
+
+	good, _ := store.get(ctx, "good")
+	if good.Status != RecStatusUploading {
+		t.Errorf("salvaged recording status = %q, want uploading", good.Status)
 	}
-	if row.Status != RecStatusFailed {
-		t.Errorf("stale recording status = %q, want failed", row.Status)
+	if good.DurationMs < 5000 {
+		t.Errorf("salvaged duration_ms = %d, want ~6000", good.DurationMs)
+	}
+	gone, _ := store.get(ctx, "gone")
+	if gone.Status != RecStatusFailed {
+		t.Errorf("lost recording status = %q, want failed", gone.Status)
 	}
 }

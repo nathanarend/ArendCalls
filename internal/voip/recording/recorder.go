@@ -23,6 +23,9 @@ import (
 	"time"
 )
 
+// WavHeaderBytes is the fixed size of the WAV header written before any samples.
+const WavHeaderBytes = 44
+
 const (
 	sampleRate   = 16000
 	channels     = 2
@@ -212,6 +215,17 @@ func consume(buf *[]float32, n int) []float32 {
 		*buf = (*buf)[:0]
 	}
 	return out
+}
+
+// ApproxDurationMs estimates a stereo recording's length from its WAV file size.
+// Used to salvage a file whose writer was killed before it could report the
+// exact duration (server restart mid-call).
+func ApproxDurationMs(fileBytes int64) int64 {
+	data := fileBytes - WavHeaderBytes
+	if data <= 0 {
+		return 0
+	}
+	return data * 1000 / (sampleRate * channels * 2)
 }
 
 func f2i(s float32) int16 {

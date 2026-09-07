@@ -1,6 +1,6 @@
 import { apiGet, apiPost, apiPatch, apiDelete } from "@/lib/api";
 import { getClientId } from "@/lib/client-id";
-import type { SessionInfo } from "@/types/session";
+import type { SessionInfo, RecordingConfig, RecordingConfigPatch, RecordingsOverview } from "@/types/session";
 
 export const listSessions = () =>
   apiGet<{ sessions: SessionInfo[] }>("/api/sessions").then((r) => r.sessions ?? []);
@@ -13,6 +13,15 @@ export const updateSession = (id: string, name: string) =>
 
 export const updateWebhookUrl = (id: string, webhook_url: string) =>
   apiPatch<{ status: string }>(`/api/sessions/${id}/webhook`, { webhook_url });
+
+export const getRecordingConfig = (id: string) =>
+  apiGet<RecordingConfig>(`/api/sessions/${id}/recording-config`);
+
+export const updateRecordingConfig = (id: string, patch: RecordingConfigPatch) =>
+  apiPatch<RecordingConfig>(`/api/sessions/${id}/recording-config`, patch);
+
+export const listRecordings = (id: string) =>
+  apiGet<RecordingsOverview>(`/api/sessions/${id}/recordings`);
 
 export const deleteSession = (id: string) => apiDelete(`/api/sessions/${id}`);
 

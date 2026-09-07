@@ -1,7 +1,6 @@
 package recording
 
 import (
-	"bytes"
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
@@ -10,14 +9,19 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 )
 
-// B2Client uploads objects to a Backblaze B2 bucket through its S3-compatible
-// API, signing requests with AWS Signature Version 4. Only the two operations
-// the recording handoff needs are implemented: PutObject and a presigned GET
-// URL. No SDK dependency — the signing is ~120 lines below.
+// B2Client talks to a Backblaze B2 bucket through its S3-compatible API, signing
+// requests with AWS Signature Version 4. Only what the recording handoff needs is
+// implemented: a streaming PutObject, a HeadObject check, and a presigned GET
+// URL. No SDK dependency.
+//
+// PutObject streams the body straight from disk (payload signed as
+// UNSIGNED-PAYLOAD, valid over HTTPS) so an upload never buffers the whole WAV in
+// memory regardless of call length.
 type B2Client struct {
 	endpoint string // e.g. https://s3.us-west-004.backblazeb2.com
 	region   string // e.g. us-west-004
@@ -54,7 +58,7 @@ func NewB2Client(c B2Config) (*B2Client, error) {
 		bucket:   c.Bucket,
 		keyID:    c.KeyID,
 		appKey:   c.AppKey,
-		http:     &http.Client{Timeout: 5 * time.Minute},
+		http:     &http.Client{Timeout: 15 * time.Minute},
 	}, nil
 }
 
@@ -71,53 +75,18 @@ func regionFromEndpoint(ep string) string {
 	return "us-east-005"
 }
 
-const sigService = "s3"
+const (
+	sigService = "s3"
+	// sha256 of the empty string — the payload hash for bodyless requests.
+	emptyPayloadHash = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+)
 
-// PutObject uploads body (already fully buffered so its length and hash are
-// known) to the given key. contentType may be empty.
-func (c *B2Client) PutObject(ctx context.Context, key, contentType string, body []byte) error {
-	now := time.Now().UTC()
-	amzDate := now.Format("20060102T150405Z")
-	dateStamp := now.Format("20060102")
-	payloadHash := hex.EncodeToString(sha256sum(body))
-
-	canonURI := "/" + s3Escape(c.bucket) + "/" + s3EscapePath(key)
-	u := c.endpoint + canonURI
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPut, u, bytes.NewReader(body))
+// PutObject streams size bytes from body to key. contentType may be empty.
+func (c *B2Client) PutObject(ctx context.Context, key, contentType string, body io.Reader, size int64) error {
+	req, err := c.signedRequest(ctx, http.MethodPut, key, body, size, contentType, "UNSIGNED-PAYLOAD")
 	if err != nil {
 		return err
 	}
-	req.ContentLength = int64(len(body))
-	req.Header.Set("X-Amz-Date", amzDate)
-	req.Header.Set("X-Amz-Content-Sha256", payloadHash)
-	if contentType != "" {
-		req.Header.Set("Content-Type", contentType)
-	}
-
-	signedHeaders, canonHeaders := c.canonicalHeaders(req)
-	canonReq := strings.Join([]string{
-		http.MethodPut,
-		canonURI,
-		"", // no query
-		canonHeaders,
-		signedHeaders,
-		payloadHash,
-	}, "\n")
-
-	scope := dateStamp + "/" + c.region + "/" + sigService + "/aws4_request"
-	stringToSign := strings.Join([]string{
-		"AWS4-HMAC-SHA256",
-		amzDate,
-		scope,
-		hex.EncodeToString(sha256sum([]byte(canonReq))),
-	}, "\n")
-
-	signature := hex.EncodeToString(hmacSHA256(c.signingKey(dateStamp), []byte(stringToSign)))
-	req.Header.Set("Authorization", fmt.Sprintf(
-		"AWS4-HMAC-SHA256 Credential=%s/%s, SignedHeaders=%s, Signature=%s",
-		c.keyID, scope, signedHeaders, signature))
-
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return err
@@ -128,6 +97,63 @@ func (c *B2Client) PutObject(ctx context.Context, key, contentType string, body 
 		return fmt.Errorf("b2 put %s: %s: %s", key, resp.Status, strings.TrimSpace(string(msg)))
 	}
 	return nil
+}
+
+// HeadObject returns the stored object's size, or an error if it is missing.
+func (c *B2Client) HeadObject(ctx context.Context, key string) (int64, error) {
+	req, err := c.signedRequest(ctx, http.MethodHead, key, nil, 0, "", emptyPayloadHash)
+	if err != nil {
+		return 0, err
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+	io.Copy(io.Discard, resp.Body)
+	if resp.StatusCode/100 != 2 {
+		return 0, fmt.Errorf("b2 head %s: %s", key, resp.Status)
+	}
+	n, _ := strconv.ParseInt(resp.Header.Get("Content-Length"), 10, 64)
+	return n, nil
+}
+
+// signedRequest builds an http.Request for key with a SigV4 Authorization header.
+// payloadHash is either a hex digest, "UNSIGNED-PAYLOAD", or emptyPayloadHash.
+func (c *B2Client) signedRequest(ctx context.Context, method, key string, body io.Reader, size int64, contentType, payloadHash string) (*http.Request, error) {
+	now := time.Now().UTC()
+	amzDate := now.Format("20060102T150405Z")
+	dateStamp := now.Format("20060102")
+
+	canonURI := "/" + s3Escape(c.bucket) + "/" + s3EscapePath(key)
+	req, err := http.NewRequestWithContext(ctx, method, c.endpoint+canonURI, body)
+	if err != nil {
+		return nil, err
+	}
+	if body != nil {
+		req.ContentLength = size
+	}
+	req.Header.Set("X-Amz-Date", amzDate)
+	req.Header.Set("X-Amz-Content-Sha256", payloadHash)
+	if contentType != "" {
+		req.Header.Set("Content-Type", contentType)
+	}
+
+	signedHeaders, canonHeaders := c.canonicalHeaders(req)
+	canonReq := strings.Join([]string{
+		method, canonURI, "", canonHeaders, signedHeaders, payloadHash,
+	}, "\n")
+
+	scope := dateStamp + "/" + c.region + "/" + sigService + "/aws4_request"
+	stringToSign := strings.Join([]string{
+		"AWS4-HMAC-SHA256", amzDate, scope,
+		hex.EncodeToString(sha256sum([]byte(canonReq))),
+	}, "\n")
+	signature := hex.EncodeToString(hmacSHA256(c.signingKey(dateStamp), []byte(stringToSign)))
+	req.Header.Set("Authorization", fmt.Sprintf(
+		"AWS4-HMAC-SHA256 Credential=%s/%s, SignedHeaders=%s, Signature=%s",
+		c.keyID, scope, signedHeaders, signature))
+	return req, nil
 }
 
 // PresignGet returns a time-limited GET URL for key, valid for ttl.
@@ -149,18 +175,12 @@ func (c *B2Client) PresignGet(key string, ttl time.Duration) string {
 	canonQuery := strings.ReplaceAll(q.Encode(), "+", "%20")
 
 	canonReq := strings.Join([]string{
-		http.MethodGet,
-		canonURI,
-		canonQuery,
-		"host:" + host + "\n",
-		"host",
-		"UNSIGNED-PAYLOAD",
+		http.MethodGet, canonURI, canonQuery,
+		"host:" + host + "\n", "host", "UNSIGNED-PAYLOAD",
 	}, "\n")
 
 	stringToSign := strings.Join([]string{
-		"AWS4-HMAC-SHA256",
-		amzDate,
-		scope,
+		"AWS4-HMAC-SHA256", amzDate, scope,
 		hex.EncodeToString(sha256sum([]byte(canonReq))),
 	}, "\n")
 	signature := hex.EncodeToString(hmacSHA256(c.signingKey(dateStamp), []byte(stringToSign)))
@@ -169,10 +189,9 @@ func (c *B2Client) PresignGet(key string, ttl time.Duration) string {
 }
 
 func (c *B2Client) canonicalHeaders(req *http.Request) (signed, canonical string) {
-	host := req.URL.Host
 	names := []string{"host", "x-amz-content-sha256", "x-amz-date"}
 	vals := map[string]string{
-		"host":                 host,
+		"host":                 req.URL.Host,
 		"x-amz-content-sha256": req.Header.Get("X-Amz-Content-Sha256"),
 		"x-amz-date":           req.Header.Get("X-Amz-Date"),
 	}

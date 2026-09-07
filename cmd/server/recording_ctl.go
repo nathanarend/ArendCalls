@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"sync"
 	"time"
@@ -25,53 +26,69 @@ type recMeta struct {
 
 type liveRecording struct {
 	meta     recMeta
-	rec      *recording.Recorder // nil until media connects
+	rec      *recording.Recorder // nil until the call is answered
+	path     string
 	started  bool
 	stopOnce sync.Once
 }
 
-// recordingController owns the server-side recording lifecycle: it decides which
-// calls to record, mixes both legs into a stereo WAV while the call is up, and
-// on hang-up hands the file off (B2 upload + Mocho webhook — see recording_handoff.go).
+// recordingController owns the server-side recording lifecycle:
+//
+//   - capture: mixes both call legs into a stereo WAV on local disk while the
+//     call is up (only after it is answered);
+//   - queue: finished recordings sit in the call_recordings table (the durable
+//     queue) and are drained by a fixed pool of upload workers — a burst of
+//     call-ends never fans out into a burst of uploads;
+//   - handoff: each worker uploads to B2, verifies it landed, deletes the local
+//     WAV, then POSTs the signed webhook to Mocho, retrying on a backoff.
 type recordingController struct {
 	appCtx  context.Context
 	store   *recordingStore
 	secrets *secretBox
 	dir     string
 	log     *slog.Logger
+	workers int
 
 	mu        sync.Mutex
 	live      map[string]*liveRecording
-	retryOnce sync.Once
+	inflight  map[string]bool // callIDs queued or being processed — upload dedupe
+	jobs      chan string
+	startOnce sync.Once
 }
 
-func newRecordingController(ctx context.Context, store *recordingStore, secrets *secretBox, dir string, log *slog.Logger) *recordingController {
+func newRecordingController(ctx context.Context, store *recordingStore, secrets *secretBox, dir string, workers int, log *slog.Logger) *recordingController {
+	if workers < 1 {
+		workers = 3
+	}
 	return &recordingController{
-		appCtx:  ctx,
-		store:   store,
-		secrets: secrets,
-		dir:     dir,
-		log:     log,
-		live:    map[string]*liveRecording{},
+		appCtx:   ctx,
+		store:    store,
+		secrets:  secrets,
+		dir:      dir,
+		log:      log,
+		workers:  workers,
+		live:     map[string]*liveRecording{},
+		inflight: map[string]bool{},
+		jobs:     make(chan string, 512),
 	}
 }
 
-// wantRecording resolves whether a call should be recorded: an explicit flag from
-// the Mocho POST wins; otherwise the per-session default applies.
-func (c *recordingController) wantRecording(sessionID string, explicit *bool) bool {
-	if explicit != nil {
-		return *explicit
-	}
-	cfg, err := c.store.config(c.appCtx, sessionID, c.secrets)
-	if err != nil {
-		c.log.Warn("recording: cannot read session config", "session", sessionID, "err", err)
-		return false
-	}
-	return cfg.Enabled
+// start launches the upload worker pool, the retry sweeper and the boot
+// recovery. Call once, after construction.
+func (c *recordingController) start() {
+	c.startOnce.Do(func() {
+		for i := 0; i < c.workers; i++ {
+			go c.worker()
+		}
+		go c.retryLoop()
+		go c.resumeOnBoot()
+		c.log.Info("recording: handoff pool started", "workers", c.workers)
+	})
 }
 
-// arm records the intent to capture a call. Call it once the call object exists
-// (outbound: on POST; inbound: on offer) and before media connects.
+// arm records the intent to capture a call. Whether a call is recorded is
+// decided solely by the caller of POST /api/sessions/{sid}/calls (the `record`
+// field); arm is invoked only when that flag is true, before the call connects.
 func (c *recordingController) arm(meta recMeta) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -89,9 +106,9 @@ func (c *recordingController) armed(callID string) bool {
 	return ok
 }
 
-// onMediaConnected starts the WAV capture. Idempotent: safe to call from every
-// relay-connected notification (mirror sessions, renegotiation).
-func (c *recordingController) onMediaConnected(callID string) *recording.Recorder {
+// onAnswered starts the WAV capture. Called when the call is answered / media is
+// live — never while it is still ringing. Idempotent.
+func (c *recordingController) onAnswered(callID string) *recording.Recorder {
 	c.mu.Lock()
 	lr, ok := c.live[callID]
 	if !ok || lr.started {
@@ -104,14 +121,14 @@ func (c *recordingController) onMediaConnected(callID string) *recording.Recorde
 	}
 	lr.started = true
 	meta := lr.meta
+	path := c.pathFor(meta)
+	lr.path = path
 	c.mu.Unlock()
 
-	path := c.pathFor(meta)
 	rec, err := recording.New(recording.Options{
 		Path:        path,
 		MaxDuration: maxRecordingDuration,
 		OnLimit:     func() { c.log.Warn("recording: 40min cap reached, auto-closing", "call", callID) },
-		Log:         nil,
 	})
 	if err != nil {
 		c.log.Error("recording: cannot start", "call", callID, "err", err)
@@ -131,13 +148,10 @@ func (c *recordingController) onMediaConnected(callID string) *recording.Recorde
 
 	c.mu.Lock()
 	if cur, ok := c.live[callID]; !ok || cur != lr {
-		// The call ended while we were setting up (disk + DB I/O). Finalize the
-		// short recording ourselves so it still reaches the handoff.
+		// The call ended while we were setting up (disk + DB I/O). Finalize it
+		// ourselves so it still reaches the queue (or gets skipped if < 5s).
 		c.mu.Unlock()
-		dur, _ := rec.Close()
-		_ = c.store.finishRecording(c.appCtx, callID, dur.Milliseconds(), time.Now().UnixMilli(), RecStatusUploading)
-		c.log.Warn("recording: call ended during startup, finalized early", "call", callID, "duration", dur.String())
-		go c.handoff(callID)
+		c.finalizeRecording(callID, path, rec)
 		return nil
 	}
 	lr.rec = rec
@@ -146,8 +160,7 @@ func (c *recordingController) onMediaConnected(callID string) *recording.Recorde
 	return rec
 }
 
-// onCallEnded finalizes the WAV, records the exact server-measured duration and
-// triggers the asynchronous handoff.
+// onCallEnded finalizes the WAV and either skips it (<5s) or queues it for upload.
 func (c *recordingController) onCallEnded(callID string) {
 	c.mu.Lock()
 	lr, ok := c.live[callID]
@@ -160,26 +173,88 @@ func (c *recordingController) onCallEnded(callID string) {
 
 	lr.stopOnce.Do(func() {
 		if lr.rec == nil {
-			// Armed but media never connected — nothing was recorded.
-			return
+			return // armed but never answered — nothing was recorded
 		}
-		dur, err := lr.rec.Close()
-		if err != nil {
-			c.log.Error("recording: finalize failed", "call", callID, "err", err)
-			_ = c.store.setStatus(c.appCtx, callID, RecStatusFailed, "finalize: "+err.Error())
-			return
-		}
-		endedAt := time.Now().UnixMilli()
-		if err := c.store.finishRecording(c.appCtx, callID, dur.Milliseconds(), endedAt, RecStatusUploading); err != nil {
-			c.log.Error("recording: cannot persist finish", "call", callID, "err", err)
-		}
-		c.log.Info("recording finalized", "call", callID, "duration", dur.String())
-		go c.handoff(callID)
+		c.finalizeRecording(callID, lr.path, lr.rec)
 	})
+}
+
+// finalizeRecording closes the WAV, measures the exact duration, and routes it:
+// shorter than 5s → discarded; otherwise → onto the upload queue.
+func (c *recordingController) finalizeRecording(callID, path string, rec *recording.Recorder) {
+	dur, err := rec.Close()
+	endedAt := time.Now().UnixMilli()
+	if err != nil {
+		c.log.Error("recording: finalize failed", "call", callID, "err", err)
+		_ = c.store.setStatus(c.appCtx, callID, RecStatusFailed, "finalize: "+err.Error())
+		return
+	}
+	if dur.Milliseconds() < minRecordingMs {
+		_ = c.store.markSkipped(c.appCtx, callID, dur.Milliseconds(), endedAt, "recording shorter than 5s")
+		if rmErr := os.Remove(path); rmErr != nil && !os.IsNotExist(rmErr) {
+			c.log.Warn("recording: could not delete skipped WAV", "call", callID, "err", rmErr)
+		}
+		c.log.Info("recording skipped (<5s)", "call", callID, "duration", dur.String())
+		return
+	}
+	if err := c.store.finishRecording(c.appCtx, callID, dur.Milliseconds(), endedAt, RecStatusUploading); err != nil {
+		c.log.Error("recording: cannot persist finish", "call", callID, "err", err)
+	}
+	c.log.Info("recording finalized, queued for upload", "call", callID, "duration", dur.String())
+	c.enqueue(callID)
+}
+
+// enqueue hands a callID to the upload pool, unless it is already queued or being
+// processed. If the queue is momentarily full the claim is released and the
+// retry sweep will pick the row up again.
+func (c *recordingController) enqueue(callID string) {
+	c.mu.Lock()
+	if c.inflight[callID] {
+		c.mu.Unlock()
+		return
+	}
+	c.inflight[callID] = true
+	c.mu.Unlock()
+
+	select {
+	case c.jobs <- callID:
+	default:
+		c.mu.Lock()
+		delete(c.inflight, callID)
+		c.mu.Unlock()
+		c.log.Warn("recording: upload queue full, deferring to retry sweep", "call", callID)
+	}
+}
+
+func (c *recordingController) worker() {
+	for {
+		select {
+		case <-c.appCtx.Done():
+			return
+		case callID := <-c.jobs:
+			c.processRecording(callID)
+			c.mu.Lock()
+			delete(c.inflight, callID)
+			c.mu.Unlock()
+		}
+	}
 }
 
 func (c *recordingController) pathFor(meta recMeta) string {
 	now := time.Now().UTC()
 	sub := filepath.Join(c.dir, meta.sessionID, fmt.Sprintf("%04d-%02d", now.Year(), int(now.Month())))
 	return filepath.Join(sub, meta.callID+".wav")
+}
+
+// diskUsageBytes reports how much the recordings directory is holding — a health
+// signal (it should stay near zero; it only grows while B2 is unreachable).
+func (c *recordingController) diskUsageBytes() int64 {
+	var total int64
+	_ = filepath.Walk(c.dir, func(_ string, info os.FileInfo, err error) error {
+		if err == nil && info != nil && !info.IsDir() {
+			total += info.Size()
+		}
+		return nil
+	})
+	return total
 }

@@ -36,6 +36,7 @@ func (s *server) routes() http.Handler {
 	mux.HandleFunc("POST /api/sessions/{sid}/check-number", s.handleCheckNumber)
 	mux.HandleFunc("GET /api/sessions/{sid}/recording-config", s.handleGetRecordingConfig)
 	mux.HandleFunc("PATCH /api/sessions/{sid}/recording-config", s.handleSetRecordingConfig)
+	mux.HandleFunc("GET /api/sessions/{sid}/recordings", s.handleListRecordings)
 	mux.HandleFunc("GET /api/sessions/{sid}/calls/{id}/recording-info", s.handleRecordingInfo)
 
 	mux.HandleFunc("GET /api/events", s.handleEvents)
@@ -207,7 +208,6 @@ func (s *server) handleSessionDelete(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-
 func (s *server) handleSessionLogout(w http.ResponseWriter, r *http.Request) {
 	if err := s.sessions.Logout(r.Context(), r.PathValue("sid")); err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
@@ -375,18 +375,11 @@ func (s *server) doStartCall(sess *Session, w http.ResponseWriter, r *http.Reque
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	if rec := sess.mgr.rec; rec != nil {
-		var explicit *bool
-		if body.Record {
-			v := true
-			explicit = &v
-		}
-		if rec.wantRecording(sess.id, explicit) {
-			rec.arm(recMeta{
-				callID: callID, sessionID: sess.id, clinicID: strings.TrimSpace(body.ClinicID),
-				direction: "outbound", peer: peer.String(),
-			})
-		}
+	if body.Record && sess.mgr.rec != nil {
+		sess.mgr.rec.arm(recMeta{
+			callID: callID, sessionID: sess.id, clinicID: strings.TrimSpace(body.ClinicID),
+			direction: "outbound", peer: peer.String(),
+		})
 	}
 
 	existing, _ := s.broker.getCall(callID)
@@ -616,5 +609,3 @@ func cleanOnlyDigits(s string) string {
 	}
 	return sb.String()
 }
-
-

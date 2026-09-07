@@ -39,7 +39,7 @@ func openDB(dbPath string) (*sql.DB, error) {
 	return db, nil
 }
 
-func newServer(ctx context.Context, dbPath, staticDir, apiKey, recDir string, maxCalls int, log *slog.Logger) (*server, error) {
+func newServer(ctx context.Context, dbPath, staticDir, apiKey, recDir string, maxCalls, recWorkers int, log *slog.Logger) (*server, error) {
 	db, err := openDB(dbPath)
 	if err != nil {
 		return nil, err
@@ -63,7 +63,7 @@ func newServer(ctx context.Context, dbPath, staticDir, apiKey, recDir string, ma
 	}
 
 	secrets := newSecretBox(log)
-	rec := newRecordingController(ctx, recStore, secrets, recDir, log)
+	rec := newRecordingController(ctx, recStore, secrets, recDir, recWorkers, log)
 
 	broker := NewBroker()
 	mgr := newSessionManager(ctx, container, broker, store, waLogger, log, maxCalls)

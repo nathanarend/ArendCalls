@@ -1,14 +1,12 @@
 import { useState, type ReactNode } from "react";
-import { Activity, Menu, PhoneCall } from "lucide-react";
+import { Menu, PhoneCall } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { Sidebar } from "./Sidebar";
 import { ThemeToggle } from "./ThemeToggle";
-import { SystemMetricsModal } from "@/components/domain/system/SystemMetricsModal";
 
 export const AppShell = ({ children }: { children: ReactNode }) => {
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [showMetrics, setShowMetrics] = useState(false);
 
   return (
     <div className="flex min-h-screen flex-col">
@@ -31,16 +29,6 @@ export const AppShell = ({ children }: { children: ReactNode }) => {
           <span className="text-lg font-semibold tracking-tight">ArendCalls</span>
         </div>
         <div className="flex items-center gap-1.5">
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => setShowMetrics(true)}
-            className="text-muted-foreground hover:text-emerald-500 transition-colors"
-            title="Recursos do Servidor (VPS)"
-            aria-label="Recursos do Servidor (VPS)"
-          >
-            <Activity className="h-4 w-4" />
-          </Button>
           <ThemeToggle />
         </div>
       </header>
@@ -50,8 +38,6 @@ export const AppShell = ({ children }: { children: ReactNode }) => {
         </aside>
         <main className="flex-1 px-4 py-6 sm:px-6">{children}</main>
       </div>
-
-      <SystemMetricsModal open={showMetrics} onOpenChange={setShowMetrics} />
     </div>
   );
 };

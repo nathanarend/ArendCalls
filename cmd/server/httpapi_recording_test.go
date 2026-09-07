@@ -41,7 +41,7 @@ func newRecTestServer(t *testing.T) (*server, *httptest.Server, string) {
 	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 	broker := NewBroker()
 	mgr := newSessionManager(ctx, container, broker, sstore, waLog.Noop, log, 0)
-	rec := newRecordingController(ctx, rstore, newSecretBox(log), t.TempDir(), log)
+	rec := newRecordingController(ctx, rstore, newSecretBox(log), t.TempDir(), 2, log)
 	mgr.rec = rec
 
 	sid := "sess-http-1"
@@ -76,42 +76,83 @@ func recDo(t *testing.T, ts *httptest.Server, method, path string, body any) (*h
 	return resp, out
 }
 
-func TestRecordingConfigEndpointPartialUpdateAndRedaction(t *testing.T) {
+var completeConfigBody = map[string]any{
+	"b2Endpoint": "https://s3.us-west-004.backblazeb2.com",
+	"b2Bucket":   "recs", "b2KeyId": "kid", "b2AppKey": "supersecret",
+	"webhookUrl": "https://mocho.example/hook", "webhookSecret": "hmac-key",
+	"urlTtlSeconds": 600,
+}
+
+func TestRecordingConfigRejectsPartial(t *testing.T) {
 	_, ts, sid := newRecTestServer(t)
 	base := "/api/sessions/" + sid + "/recording-config"
 
-	// Initial: disabled, nothing set.
-	resp, got := recDo(t, ts, http.MethodGet, base, nil)
-	if resp.StatusCode != 200 || got["enabled"] != false {
-		t.Fatalf("initial GET: %d %v", resp.StatusCode, got)
+	// B2 without the webhook → rejected.
+	resp, got := recDo(t, ts, http.MethodPatch, base, map[string]any{
+		"b2Endpoint": "https://x", "b2Bucket": "b", "b2KeyId": "k", "b2AppKey": "a",
+	})
+	if resp.StatusCode != 400 {
+		t.Fatalf("partial config: got %d, want 400 (%v)", resp.StatusCode, got)
+	}
+	miss, _ := got["missing"].([]any)
+	if len(miss) != 2 { // webhookUrl, webhookSecret
+		t.Errorf("missing = %v, want [webhookSecret webhookUrl]", got["missing"])
 	}
 
-	// PATCH B2 creds + enable.
-	resp, got = recDo(t, ts, http.MethodPatch, base, map[string]any{
-		"enabled": true, "b2Endpoint": "https://s3.us-west-004.backblazeb2.com",
-		"b2Bucket": "recs", "b2KeyId": "kid", "b2AppKey": "supersecret", "urlTtlSeconds": 600,
+	// Nothing was persisted.
+	_, got = recDo(t, ts, http.MethodGet, base, nil)
+	if got["b2Bucket"] != "" || got["complete"] != false {
+		t.Errorf("rejected config leaked into storage: %v", got)
+	}
+}
+
+func TestRecordingConfigAcceptsCompleteAndEmpty(t *testing.T) {
+	_, ts, sid := newRecTestServer(t)
+	base := "/api/sessions/" + sid + "/recording-config"
+
+	resp, got := recDo(t, ts, http.MethodPatch, base, completeConfigBody)
+	if resp.StatusCode != 200 {
+		t.Fatalf("complete config rejected: %d %v", resp.StatusCode, got)
+	}
+	if got["complete"] != true || got["b2AppKeySet"] != true || got["webhookSecretSet"] != true || got["b2AppKey"] != nil {
+		t.Errorf("redacted config wrong: %v", got)
+	}
+
+	// Clearing everything is allowed.
+	resp, _ = recDo(t, ts, http.MethodPatch, base, map[string]any{
+		"b2Endpoint": "", "b2Bucket": "", "b2KeyId": "", "b2AppKey": "",
+		"webhookUrl": "", "webhookSecret": "", "urlTtlSeconds": 0,
 	})
 	if resp.StatusCode != 200 {
-		t.Fatalf("PATCH failed: %d %v", resp.StatusCode, got)
-	}
-	if got["b2AppKeySet"] != true || got["b2AppKey"] != nil {
-		t.Errorf("app key should be redacted: %v", got)
-	}
-
-	// PATCH only webhookUrl — B2 creds must survive.
-	resp, _ = recDo(t, ts, http.MethodPatch, base, map[string]any{"webhookUrl": "https://mocho.example/hook"})
-	if resp.StatusCode != 200 {
-		t.Fatal("second PATCH failed")
+		t.Fatalf("clearing config rejected: %d", resp.StatusCode)
 	}
 	_, got = recDo(t, ts, http.MethodGet, base, nil)
-	if got["b2Bucket"] != "recs" || got["b2AppKeySet"] != true {
-		t.Errorf("partial PATCH clobbered B2 config: %v", got)
+	if got["complete"] != false || got["b2Bucket"] != "" {
+		t.Errorf("config not cleared: %v", got)
 	}
-	if got["webhookUrl"] != "https://mocho.example/hook" {
-		t.Errorf("webhookUrl not persisted: %v", got)
+}
+
+func TestRecordingConfigPartialUpdateKeepsComplete(t *testing.T) {
+	srv, ts, sid := newRecTestServer(t)
+	base := "/api/sessions/" + sid + "/recording-config"
+
+	if resp, got := recDo(t, ts, http.MethodPatch, base, completeConfigBody); resp.StatusCode != 200 {
+		t.Fatalf("seed config: %d %v", resp.StatusCode, got)
 	}
-	if got["enabled"] != true || got["urlTtlSeconds"] != float64(600) {
-		t.Errorf("scalars not persisted: %v", got)
+	// Change only the bucket — the rest (incl. secrets) must survive and stay complete.
+	if resp, _ := recDo(t, ts, http.MethodPatch, base, map[string]any{"b2Bucket": "recs-2"}); resp.StatusCode != 200 {
+		t.Fatal("partial PATCH failed")
+	}
+	_, got := recDo(t, ts, http.MethodGet, base, nil)
+	if got["b2Bucket"] != "recs-2" || got["complete"] != true {
+		t.Errorf("partial PATCH broke config: %v", got)
+	}
+	cfg, err := srv.recStore.config(context.Background(), sid, srv.rec.secrets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.B2AppKey != "supersecret" || cfg.WebhookSecret != "hmac-key" {
+		t.Errorf("secrets lost on partial PATCH: %+v", cfg)
 	}
 }
 
@@ -119,7 +160,6 @@ func TestRecordingInfoEndpoint(t *testing.T) {
 	srv, ts, sid := newRecTestServer(t)
 	ctx := context.Background()
 
-	// Unknown call -> 404.
 	resp, _ := recDo(t, ts, http.MethodGet, "/api/sessions/"+sid+"/calls/nope/recording-info", nil)
 	if resp.StatusCode != 404 {
 		t.Fatalf("unknown recording: got %d", resp.StatusCode)
@@ -141,25 +181,34 @@ func TestRecordingInfoEndpoint(t *testing.T) {
 		t.Errorf("recording-info payload wrong: %v", got)
 	}
 
-	// A recording that belongs to another session must not leak.
 	resp, _ = recDo(t, ts, http.MethodGet, "/api/sessions/other/calls/c-info/recording-info", nil)
 	if resp.StatusCode == 200 {
 		t.Error("recording-info leaked across sessions")
 	}
 }
 
-func TestRecordingConfigDecryptsSecretThroughStore(t *testing.T) {
+func TestListRecordingsEndpoint(t *testing.T) {
 	srv, ts, sid := newRecTestServer(t)
-	base := "/api/sessions/" + sid + "/recording-config"
-	resp, _ := recDo(t, ts, http.MethodPatch, base, map[string]any{"b2AppKey": "roundtrip-me", "webhookSecret": "hmac-key"})
+	ctx := context.Background()
+
+	_ = srv.recStore.begin(ctx, RecordingRow{CallID: "r1", SessionID: sid, LocalPath: "/a.wav", Channels: "stereo", Direction: "outbound", Peer: "551199@s.whatsapp.net", StartedAt: 1000})
+	_ = srv.recStore.finishRecording(ctx, "r1", 12000, 2000, RecStatusUploading)
+	_ = srv.recStore.begin(ctx, RecordingRow{CallID: "r2", SessionID: sid, LocalPath: "/b.wav", Channels: "stereo", StartedAt: 3000})
+	_ = srv.recStore.markSkipped(ctx, "r2", 2000, 4000, "recording shorter than 5s")
+
+	resp, got := recDo(t, ts, http.MethodGet, "/api/sessions/"+sid+"/recordings", nil)
 	if resp.StatusCode != 200 {
-		t.Fatal("patch failed")
+		t.Fatalf("list: %d %v", resp.StatusCode, got)
 	}
-	cfg, err := srv.recStore.config(context.Background(), sid, srv.rec.secrets)
-	if err != nil {
-		t.Fatal(err)
+	if got["configured"] != false {
+		t.Errorf("configured = %v, want false", got["configured"])
 	}
-	if cfg.B2AppKey != "roundtrip-me" || cfg.WebhookSecret != "hmac-key" {
-		t.Errorf("secret round-trip failed: %+v", cfg)
+	recs, _ := got["recordings"].([]any)
+	if len(recs) != 2 {
+		t.Fatalf("recordings len = %d, want 2", len(recs))
+	}
+	stats, _ := got["stats"].(map[string]any)
+	if stats["uploading"] != float64(1) || stats["skipped"] != float64(1) {
+		t.Errorf("stats = %v", stats)
 	}
 }

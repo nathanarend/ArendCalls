@@ -81,7 +81,7 @@ func (s *Session) resolvePeerName(peerStr string) string {
 			peerJID = pnJID
 		}
 	}
-	
+
 	if s.client.Store.Contacts != nil {
 		contactInfo, err := s.client.Store.Contacts.GetContact(context.Background(), peerJID)
 		if err == nil && contactInfo.Found {
@@ -144,9 +144,6 @@ func (s *Session) wireCall(cm *call.CallManager, callID string) {
 			SessionID: s.id, CallID: c.CallID, Direction: "inbound", Peer: peer, PeerName: peerName,
 			StartedAt: time.Now().UnixMilli(), Status: StatusRinging,
 		})
-		if s.mgr.rec != nil && s.mgr.rec.wantRecording(s.id, nil) {
-			s.mgr.rec.arm(recMeta{callID: c.CallID, sessionID: s.id, direction: "inbound", peer: peer})
-		}
 		s.mgr.broker.emitIncoming(s.id, c.CallID, peer, peerName)
 	}
 	cm.OnStateChange = func(c *call.CallInfo) {
@@ -161,6 +158,10 @@ func (s *Session) wireCall(cm *call.CallManager, callID string) {
 		}
 		if c.StateData.State == core.CallStateActive || c.StateData.State == core.CallStateConnecting {
 			stopTimeout()
+		}
+		// Recording only starts once the call is answered — never while ringing.
+		if c.StateData.State == core.CallStateActive {
+			s.startRecordingIfArmed(c.CallID)
 		}
 		dir := "outbound"
 		if c.Direction == core.CallDirectionIncoming {
@@ -206,13 +207,24 @@ func (s *Session) wireCall(cm *call.CallManager, callID string) {
 	cm.OnRelayConnected = func() {
 		s.log.Info("relay connected: cancelling ringing timeout", "call_id", callID)
 		stopTimeout()
-		if s.mgr.rec != nil && s.mgr.rec.armed(callID) {
-			if ac, ok := s.reg.get(callID); ok {
-				if r := s.mgr.rec.onMediaConnected(callID); r != nil {
-					ac.rec.Store(r)
-				}
-			}
-		}
+		// Media is flowing, which for an outbound call means it was answered.
+		s.startRecordingIfArmed(callID)
+	}
+}
+
+// startRecordingIfArmed begins the WAV capture for a call that asked for
+// recording, once it is answered. Idempotent — fires from both the answered
+// state change and the media-relay-connected hook, whichever lands first.
+func (s *Session) startRecordingIfArmed(callID string) {
+	if s.mgr.rec == nil || !s.mgr.rec.armed(callID) {
+		return
+	}
+	ac, ok := s.reg.get(callID)
+	if !ok {
+		return
+	}
+	if r := s.mgr.rec.onAnswered(callID); r != nil {
+		ac.rec.Store(r)
 	}
 }
 

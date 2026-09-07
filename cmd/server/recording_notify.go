@@ -30,8 +30,10 @@ type recordingReadyPayload struct {
 // notify delivers the "recording ready" webhook to Mocho. A non-2xx or transport
 // error leaves notified_at at 0 so the retry worker tries again with backoff.
 func (c *recordingController) notify(ctx context.Context, row RecordingRow, cfg RecordingConfig) {
-	if cfg.WebhookURL == "" {
-		c.log.Warn("recording notify: no webhook URL configured for session", "call", row.CallID, "session", row.SessionID)
+	if cfg.WebhookURL == "" || cfg.WebhookSecret == "" {
+		// Config guarantees both are present before we get here; this is a
+		// safety net if the config was cleared after the upload.
+		c.log.Warn("recording notify: webhook not configured", "call", row.CallID, "session", row.SessionID)
 		return
 	}
 	_ = c.store.incNotifyAttempts(ctx, row.CallID)
@@ -96,14 +98,8 @@ func backoffFor(attempt int) time.Duration {
 	return retryBackoff[len(retryBackoff)-1]
 }
 
-// startRetryWorker launches the single background loop that re-drives failed
-// uploads and un-acked webhooks on a backoff schedule. Idempotent.
-func (c *recordingController) startRetryWorker() {
-	c.retryOnce.Do(func() {
-		go c.retryLoop()
-	})
-}
-
+// retryLoop re-queues failed uploads and un-acked webhooks on a backoff
+// schedule. Started once by (*recordingController).start.
 func (c *recordingController) retryLoop() {
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
@@ -135,14 +131,12 @@ func (c *recordingController) retrySweep() {
 		if r.LastAttemptAt != 0 && now.Sub(time.UnixMilli(r.LastAttemptAt)) < backoffFor(attempts) {
 			continue
 		}
-		// A recording still awaiting B2 setup is not a failure to retry — it
-		// just sits until the session gets credentials (then a later sweep
-		// picks it up). Skip silently so it does not churn every tick.
-		if cfg, err := c.store.config(c.appCtx, r.SessionID, c.secrets); err == nil && !cfg.b2Ready() {
+		// Session not fully configured yet — the WAV just waits, not a failure
+		// to churn on. A later sweep picks it up once B2 + webhook are set.
+		if cfg, err := c.store.config(c.appCtx, r.SessionID, c.secrets); err == nil && !cfg.complete() {
 			continue
 		}
-		c.log.Info("recording retry: re-driving handoff", "call", r.CallID, "status", string(r.Status), "attempt", attempts+1)
-		go c.handoff(r.CallID)
+		c.enqueue(r.CallID) // dedupe drops it if a worker already has it
 	}
 }
 

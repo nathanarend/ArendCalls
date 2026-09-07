@@ -4,6 +4,7 @@ import { Dialer } from "@/components/domain/call/Dialer";
 import { CallCard } from "@/components/domain/call/CallCard";
 import { OtherCallsList } from "@/components/domain/call/OtherCallsList";
 import { HistoryDrawer } from "@/components/domain/history/HistoryDrawer";
+import { RecordingsDrawer } from "@/components/domain/recording/RecordingsDrawer";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { isMine, useCalls } from "@/stores/calls";
 
@@ -26,7 +27,10 @@ export const CallsPage = ({ sid }: { sid: string }) => {
         <h2 className="text-sm font-medium text-muted-foreground">
           {mine.length} chamada{mine.length === 1 ? "" : "s"} ativa{mine.length === 1 ? "" : "s"}
         </h2>
-        <HistoryDrawer sid={sid} />
+        <div className="flex items-center gap-2">
+          <RecordingsDrawer sid={sid} />
+          <HistoryDrawer sid={sid} />
+        </div>
       </div>
       <Dialer sid={sid} />
       {mine.length > 0 ? (

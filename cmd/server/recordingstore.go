@@ -10,11 +10,15 @@ import (
 type RecordingStatus string
 
 const (
-	RecStatusRecording RecordingStatus = "recording"
-	RecStatusUploading RecordingStatus = "uploading"
-	RecStatusReady     RecordingStatus = "ready"
-	RecStatusFailed    RecordingStatus = "failed"
+	RecStatusRecording RecordingStatus = "recording" // capture in progress
+	RecStatusUploading RecordingStatus = "uploading" // finished, queued for B2
+	RecStatusReady     RecordingStatus = "ready"     // in B2, webhook maybe still owed
+	RecStatusFailed    RecordingStatus = "failed"    // last attempt errored, will retry
+	RecStatusSkipped   RecordingStatus = "skipped"   // too short (<5s) — not uploaded
 )
+
+// minRecordingDuration: recordings shorter than this are discarded, not uploaded.
+const minRecordingMs = 5000
 
 // RecordingRow is one row of the call_recordings table. It survives restarts so
 // the upload/notify workers can resume interrupted handoffs.
@@ -69,7 +73,6 @@ func newRecordingStore(ctx context.Context, db *sql.DB) (*recordingStore, error)
 	}
 	_, err = db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS recording_config (
 		session_id         TEXT PRIMARY KEY,
-		enabled            INTEGER DEFAULT 0,
 		b2_endpoint        TEXT,
 		b2_region          TEXT,
 		b2_bucket          TEXT,
@@ -92,7 +95,6 @@ func newRecordingStore(ctx context.Context, db *sql.DB) (*recordingStore, error)
 // here already decrypted.
 type RecordingConfig struct {
 	SessionID     string
-	Enabled       bool
 	B2Endpoint    string
 	B2Region      string
 	B2Bucket      string
@@ -104,21 +106,30 @@ type RecordingConfig struct {
 	URLTTLSeconds int
 }
 
-// b2Ready reports whether the session has enough config to upload directly to B2.
-func (c RecordingConfig) b2Ready() bool {
-	return c.B2Endpoint != "" && c.B2Bucket != "" && c.B2KeyID != "" && c.B2AppKey != ""
+// complete reports whether the session can actually deliver a recording: B2 and
+// the Mocho webhook are mutually required, so both must be fully set.
+func (c RecordingConfig) complete() bool {
+	return c.B2Endpoint != "" && c.B2Bucket != "" && c.B2KeyID != "" && c.B2AppKey != "" &&
+		c.WebhookURL != "" && c.WebhookSecret != ""
+}
+
+// isEmpty reports whether no destination field is set (config never configured,
+// or explicitly cleared). Anything between empty and complete is rejected.
+func (c RecordingConfig) isEmpty() bool {
+	return c.B2Endpoint == "" && c.B2Region == "" && c.B2Bucket == "" && c.B2KeyID == "" &&
+		c.B2AppKey == "" && c.B2Prefix == "" && c.WebhookURL == "" && c.WebhookSecret == "" &&
+		c.URLTTLSeconds == 0
 }
 
 func (s *recordingStore) config(ctx context.Context, sessionID string, dec secretDecryptor) (RecordingConfig, error) {
 	c := RecordingConfig{SessionID: sessionID}
-	var enabled int
 	var appKeyEnc, secretEnc string
-	err := s.db.QueryRowContext(ctx, `SELECT enabled,
+	err := s.db.QueryRowContext(ctx, `SELECT
 		COALESCE(b2_endpoint,''), COALESCE(b2_region,''), COALESCE(b2_bucket,''),
 		COALESCE(b2_key_id,''), COALESCE(b2_app_key_enc,''), COALESCE(b2_prefix,''),
 		COALESCE(webhook_url,''), COALESCE(webhook_secret_enc,''), COALESCE(url_ttl_seconds,0)
 		FROM recording_config WHERE session_id=?`, sessionID).Scan(
-		&enabled, &c.B2Endpoint, &c.B2Region, &c.B2Bucket, &c.B2KeyID, &appKeyEnc,
+		&c.B2Endpoint, &c.B2Region, &c.B2Bucket, &c.B2KeyID, &appKeyEnc,
 		&c.B2Prefix, &c.WebhookURL, &secretEnc, &c.URLTTLSeconds)
 	if err == sql.ErrNoRows {
 		return c, nil
@@ -126,7 +137,6 @@ func (s *recordingStore) config(ctx context.Context, sessionID string, dec secre
 	if err != nil {
 		return c, err
 	}
-	c.Enabled = enabled != 0
 	if c.B2AppKey, err = dec.Decrypt(appKeyEnc); err != nil {
 		return c, err
 	}
@@ -145,21 +155,17 @@ func (s *recordingStore) saveConfig(ctx context.Context, c RecordingConfig, enc 
 	if err != nil {
 		return err
 	}
-	enabled := 0
-	if c.Enabled {
-		enabled = 1
-	}
 	_, err = s.db.ExecContext(ctx, `INSERT INTO recording_config
-		(session_id, enabled, b2_endpoint, b2_region, b2_bucket, b2_key_id, b2_app_key_enc,
+		(session_id, b2_endpoint, b2_region, b2_bucket, b2_key_id, b2_app_key_enc,
 		 b2_prefix, webhook_url, webhook_secret_enc, url_ttl_seconds, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(session_id) DO UPDATE SET
-			enabled=excluded.enabled, b2_endpoint=excluded.b2_endpoint, b2_region=excluded.b2_region,
+			b2_endpoint=excluded.b2_endpoint, b2_region=excluded.b2_region,
 			b2_bucket=excluded.b2_bucket, b2_key_id=excluded.b2_key_id, b2_app_key_enc=excluded.b2_app_key_enc,
 			b2_prefix=excluded.b2_prefix, webhook_url=excluded.webhook_url,
 			webhook_secret_enc=excluded.webhook_secret_enc, url_ttl_seconds=excluded.url_ttl_seconds,
 			updated_at=excluded.updated_at`,
-		c.SessionID, enabled, c.B2Endpoint, c.B2Region, c.B2Bucket, c.B2KeyID, appKeyEnc,
+		c.SessionID, c.B2Endpoint, c.B2Region, c.B2Bucket, c.B2KeyID, appKeyEnc,
 		c.B2Prefix, c.WebhookURL, secretEnc, c.URLTTLSeconds, time.Now().UnixMilli())
 	return err
 }
@@ -197,6 +203,13 @@ func (s *recordingStore) markUploaded(ctx context.Context, callID, b2Key, b2URL 
 	_, err := s.db.ExecContext(ctx, `UPDATE call_recordings
 		SET status=?, b2_key=?, b2_url=?, error='' WHERE call_id=?`,
 		string(RecStatusReady), b2Key, b2URL, callID)
+	return err
+}
+
+func (s *recordingStore) markSkipped(ctx context.Context, callID string, durationMs, endedAt int64, reason string) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE call_recordings
+		SET status=?, duration_ms=?, ended_at=?, error=? WHERE call_id=?`,
+		string(RecStatusSkipped), durationMs, endedAt, reason, callID)
 	return err
 }
 
@@ -251,14 +264,66 @@ func (s *recordingStore) pendingHandoff(ctx context.Context) ([]RecordingRow, er
 	return out, rows.Err()
 }
 
-// reapStaleRecording turns rows stuck in "recording" (process died mid-call, the
-// audio buffer is gone) into failed captures so they stop blocking the worker.
-func (s *recordingStore) reapStaleRecording(ctx context.Context) error {
-	_, err := s.db.ExecContext(ctx, `UPDATE call_recordings
-		SET status=?, error='interrupted by server restart', ended_at=?
-		WHERE status=?`,
-		string(RecStatusFailed), time.Now().UnixMilli(), string(RecStatusRecording))
-	return err
+// staleRecordings returns rows left in "recording" by a restart. The caller
+// decides per row: salvage the WAV if it is intact on disk, else mark failed.
+func (s *recordingStore) staleRecordings(ctx context.Context) ([]RecordingRow, error) {
+	rows, err := s.db.QueryContext(ctx, recordingSelectCols+` WHERE status=?`, string(RecStatusRecording))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []RecordingRow
+	for rows.Next() {
+		r, err := scanRecording(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *r)
+	}
+	return out, rows.Err()
+}
+
+// listBySession returns the most recent recordings for a session, newest first,
+// for the per-session monitoring view.
+func (s *recordingStore) listBySession(ctx context.Context, sessionID string, limit int) ([]RecordingRow, error) {
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
+	rows, err := s.db.QueryContext(ctx, recordingSelectCols+`
+		WHERE session_id=? ORDER BY created_at DESC LIMIT ?`, sessionID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []RecordingRow
+	for rows.Next() {
+		r, err := scanRecording(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *r)
+	}
+	return out, rows.Err()
+}
+
+// sessionRecordingStats summarizes a session's recordings for the monitoring header.
+func (s *recordingStore) sessionRecordingStats(ctx context.Context, sessionID string) (map[string]int, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT status, COUNT(*) FROM call_recordings
+		WHERE session_id=? GROUP BY status`, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]int{}
+	for rows.Next() {
+		var st string
+		var n int
+		if err := rows.Scan(&st, &n); err != nil {
+			return nil, err
+		}
+		out[st] = n
+	}
+	return out, rows.Err()
 }
 
 const recordingSelectCols = `SELECT call_id, session_id, COALESCE(clinic_id,''), status,
