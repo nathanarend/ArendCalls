@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { ChevronDown, ChevronUp, Copy } from "lucide-react";
 import { toast } from "sonner";
-import { adminRoutes, sessionRoutes, RouteInfo } from "@/constants/api-routes";
+import { adminRoutes, sessionRoutes, recordingRoutes, RouteInfo } from "@/constants/api-routes";
 
 export const ApiDocs = () => {
   const [expandedIndex, setExpandedIndex] = useState<string | null>(null);
@@ -36,7 +36,13 @@ export const ApiDocs = () => {
         {route.payload && (
           <div>
             <span className="text-muted-foreground font-semibold uppercase block mb-1">Payload (JSON):</span>
-            <pre className="bg-background p-2 rounded border">{JSON.stringify(route.payload, null, 2)}</pre>
+            <pre className="bg-background p-2 rounded border overflow-x-auto whitespace-pre">{JSON.stringify(route.payload, null, 2)}</pre>
+          </div>
+        )}
+        {route.response && (
+          <div>
+            <span className="text-muted-foreground font-semibold uppercase block mb-1">Resposta (exemplo):</span>
+            <pre className="bg-background p-2 rounded border overflow-x-auto whitespace-pre">{JSON.stringify(route.response, null, 2)}</pre>
           </div>
         )}
         <div>
@@ -157,7 +163,53 @@ export const ApiDocs = () => {
           </p>
           {renderTable(sessionRoutes, "session")}
         </div>
-        
+
+        <div className="space-y-4">
+          <h2 className="text-xl font-bold text-foreground">3. Gravação de Chamadas (Servidor)</h2>
+          <p className="text-sm text-muted-foreground">
+            O ArendCalls grava a chamada em <strong>WAV estéreo</strong> (atendente à esquerda, cliente à direita),
+            sobe para o <strong>Backblaze B2</strong> da conta e avisa o Mocho por webhook assinado.
+          </p>
+          <ul className="list-disc pl-5 text-sm text-muted-foreground space-y-1.5">
+            <li>A gravação é <strong>por chamada</strong>: passe <code>record: true</code> no <code>POST /api/sessions/{'{sid}'}/calls</code>. Não há default por sessão.</li>
+            <li>Só grava <strong>depois que a chamada é atendida</strong>. Gravações com menos de <strong>5 segundos</strong> são descartadas (status <code>skipped</code>).</li>
+            <li><strong>B2 e webhook são obrigatórios juntos.</strong> Sem os dois configurados, o WAV fica no disco do servidor aguardando o setup — nada é perdido.</li>
+            <li>O envio passa por uma <strong>fila persistente</strong> com um pool de workers (padrão 3). Uma rajada de chamadas encerrando não vira uma rajada de uploads. Falhas são reenviadas com backoff (1min → 5min → 15min → 1h) e sobrevivem a reinício do servidor.</li>
+            <li>O arquivo local só é apagado <strong>depois</strong> do B2 confirmar (existência + tamanho).</li>
+          </ul>
+          {renderTable(recordingRoutes, "recording")}
+        </div>
+
+        <div className="mt-8 space-y-4 pt-6 border-t">
+          <h2 className="text-xl font-semibold">Webhook "Gravação Pronta" (recebido pelo seu sistema)</h2>
+          <p className="text-sm text-muted-foreground">
+            Quando a gravação é confirmada no B2, o ArendCalls faz um <code>POST</code> na <code>webhookUrl</code> configurada
+            (rota da seção 3) com o corpo abaixo. O corpo é assinado: o cabeçalho <code>X-ArendCalls-Signature: sha256=&lt;hmac&gt;</code> é
+            o HMAC-SHA256 do corpo <em>bruto</em> usando o <code>webhookSecret</code>. Responda <code>2xx</code> para confirmar o recebimento;
+            qualquer outra resposta faz o ArendCalls reenviar no backoff.
+          </p>
+          <div className="bg-muted/60 p-4 rounded-xl border border-border space-y-2 font-mono text-xs">
+            <span className="text-muted-foreground font-semibold uppercase block">Corpo do POST:</span>
+            <pre className="text-foreground overflow-x-auto whitespace-pre">{JSON.stringify({
+              callId: "1A2B3C...",
+              sessionId: "SUA_SESSION_ID",
+              clinicId: "clinica-123",
+              recordingKey: "clinica-x/recordings/clinica-123/2026/09/1A2B3C....wav",
+              recordingUrl: "https://s3.us-west-004.backblazeb2.com/...&X-Amz-Signature=...",
+              durationSeconds: 143,
+              channels: "stereo",
+              mimeType: "audio/wav",
+              startedAt: "2026-09-06T21:00:00Z",
+              endedAt: "2026-09-06T21:02:23Z",
+            }, null, 2)}</pre>
+          </div>
+          <ul className="list-disc pl-5 text-sm text-muted-foreground space-y-2">
+            <li><code>recordingUrl</code> só vem preenchida se <code>urlTtlSeconds &gt; 0</code>. Caso contrário, use a <code>recordingKey</code> e assine a URL do seu lado.</li>
+            <li>O ArendCalls pode reenviar o mesmo evento (ex.: reinício entre o POST e a confirmação interna). <strong>Deduplique por <code>callId</code>.</strong></li>
+            <li>Se o webhook se perdeu, consulte <code>GET /api/sessions/{'{sid}'}/calls/{'{id}'}/recording-info</code> para reconciliar.</li>
+          </ul>
+        </div>
+
         <div className="mt-8 space-y-4 pt-6 border-t">
           <h2 className="text-xl font-semibold">Webhooks Ativos (Alternativa ao SSE)</h2>
           <p className="text-sm text-muted-foreground">
