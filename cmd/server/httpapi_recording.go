@@ -19,6 +19,7 @@ type recordingConfigBody struct {
 	WebhookURL    *string `json:"webhookUrl"`
 	WebhookSecret *string `json:"webhookSecret"`
 	URLTTLSeconds *int    `json:"urlTtlSeconds"`
+	RecordInbound *bool   `json:"recordInbound"`
 }
 
 func (s *server) handleSetRecordingConfig(w http.ResponseWriter, r *http.Request) {
@@ -48,6 +49,9 @@ func (s *server) handleSetRecordingConfig(w http.ResponseWriter, r *http.Request
 	setStr(&cur.WebhookSecret, body.WebhookSecret)
 	if body.URLTTLSeconds != nil {
 		cur.URLTTLSeconds = *body.URLTTLSeconds
+	}
+	if body.RecordInbound != nil {
+		cur.RecordInbound = *body.RecordInbound
 	}
 	cur.SessionID = sess.id
 
@@ -179,6 +183,7 @@ func redactedConfig(c RecordingConfig) map[string]any {
 		"webhookUrl":       c.WebhookURL,
 		"webhookSecretSet": c.WebhookSecret != "",
 		"urlTtlSeconds":    c.URLTTLSeconds,
+		"recordInbound":    c.RecordInbound,
 	}
 }
 

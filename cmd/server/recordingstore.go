@@ -82,11 +82,14 @@ func newRecordingStore(ctx context.Context, db *sql.DB) (*recordingStore, error)
 		webhook_url        TEXT,
 		webhook_secret_enc TEXT,
 		url_ttl_seconds    INTEGER DEFAULT 0,
+		record_inbound     INTEGER DEFAULT 0,
 		updated_at         INTEGER
 	)`)
 	if err != nil {
 		return nil, err
 	}
+	// Add column for DBs created before record_inbound existed.
+	db.ExecContext(ctx, `ALTER TABLE recording_config ADD COLUMN record_inbound INTEGER DEFAULT 0`)
 	return &recordingStore{db: db}, nil
 }
 
@@ -104,6 +107,9 @@ type RecordingConfig struct {
 	WebhookURL    string
 	WebhookSecret string
 	URLTTLSeconds int
+	// RecordInbound: when true, every answered incoming call on this session is
+	// recorded even without an explicit record flag on the accept request.
+	RecordInbound bool
 }
 
 // complete reports whether the session can actually deliver a recording: B2 and
@@ -124,19 +130,22 @@ func (c RecordingConfig) isEmpty() bool {
 func (s *recordingStore) config(ctx context.Context, sessionID string, dec secretDecryptor) (RecordingConfig, error) {
 	c := RecordingConfig{SessionID: sessionID}
 	var appKeyEnc, secretEnc string
+	var recInbound int
 	err := s.db.QueryRowContext(ctx, `SELECT
 		COALESCE(b2_endpoint,''), COALESCE(b2_region,''), COALESCE(b2_bucket,''),
 		COALESCE(b2_key_id,''), COALESCE(b2_app_key_enc,''), COALESCE(b2_prefix,''),
-		COALESCE(webhook_url,''), COALESCE(webhook_secret_enc,''), COALESCE(url_ttl_seconds,0)
+		COALESCE(webhook_url,''), COALESCE(webhook_secret_enc,''), COALESCE(url_ttl_seconds,0),
+		COALESCE(record_inbound,0)
 		FROM recording_config WHERE session_id=?`, sessionID).Scan(
 		&c.B2Endpoint, &c.B2Region, &c.B2Bucket, &c.B2KeyID, &appKeyEnc,
-		&c.B2Prefix, &c.WebhookURL, &secretEnc, &c.URLTTLSeconds)
+		&c.B2Prefix, &c.WebhookURL, &secretEnc, &c.URLTTLSeconds, &recInbound)
 	if err == sql.ErrNoRows {
 		return c, nil
 	}
 	if err != nil {
 		return c, err
 	}
+	c.RecordInbound = recInbound != 0
 	if c.B2AppKey, err = dec.Decrypt(appKeyEnc); err != nil {
 		return c, err
 	}
@@ -155,18 +164,22 @@ func (s *recordingStore) saveConfig(ctx context.Context, c RecordingConfig, enc 
 	if err != nil {
 		return err
 	}
+	recInbound := 0
+	if c.RecordInbound {
+		recInbound = 1
+	}
 	_, err = s.db.ExecContext(ctx, `INSERT INTO recording_config
 		(session_id, b2_endpoint, b2_region, b2_bucket, b2_key_id, b2_app_key_enc,
-		 b2_prefix, webhook_url, webhook_secret_enc, url_ttl_seconds, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		 b2_prefix, webhook_url, webhook_secret_enc, url_ttl_seconds, record_inbound, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(session_id) DO UPDATE SET
 			b2_endpoint=excluded.b2_endpoint, b2_region=excluded.b2_region,
 			b2_bucket=excluded.b2_bucket, b2_key_id=excluded.b2_key_id, b2_app_key_enc=excluded.b2_app_key_enc,
 			b2_prefix=excluded.b2_prefix, webhook_url=excluded.webhook_url,
 			webhook_secret_enc=excluded.webhook_secret_enc, url_ttl_seconds=excluded.url_ttl_seconds,
-			updated_at=excluded.updated_at`,
+			record_inbound=excluded.record_inbound, updated_at=excluded.updated_at`,
 		c.SessionID, c.B2Endpoint, c.B2Region, c.B2Bucket, c.B2KeyID, appKeyEnc,
-		c.B2Prefix, c.WebhookURL, secretEnc, c.URLTTLSeconds, time.Now().UnixMilli())
+		c.B2Prefix, c.WebhookURL, secretEnc, c.URLTTLSeconds, recInbound, time.Now().UnixMilli())
 	return err
 }
 

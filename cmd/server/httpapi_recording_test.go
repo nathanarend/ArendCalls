@@ -139,20 +139,20 @@ func TestRecordingConfigPartialUpdateKeepsComplete(t *testing.T) {
 	if resp, got := recDo(t, ts, http.MethodPatch, base, completeConfigBody); resp.StatusCode != 200 {
 		t.Fatalf("seed config: %d %v", resp.StatusCode, got)
 	}
-	// Change only the bucket — the rest (incl. secrets) must survive and stay complete.
-	if resp, _ := recDo(t, ts, http.MethodPatch, base, map[string]any{"b2Bucket": "recs-2"}); resp.StatusCode != 200 {
+	// Change only the bucket + toggle recordInbound — secrets must survive and stay complete.
+	if resp, _ := recDo(t, ts, http.MethodPatch, base, map[string]any{"b2Bucket": "recs-2", "recordInbound": true}); resp.StatusCode != 200 {
 		t.Fatal("partial PATCH failed")
 	}
 	_, got := recDo(t, ts, http.MethodGet, base, nil)
-	if got["b2Bucket"] != "recs-2" || got["complete"] != true {
+	if got["b2Bucket"] != "recs-2" || got["complete"] != true || got["recordInbound"] != true {
 		t.Errorf("partial PATCH broke config: %v", got)
 	}
 	cfg, err := srv.recStore.config(context.Background(), sid, srv.rec.secrets)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.B2AppKey != "supersecret" || cfg.WebhookSecret != "hmac-key" {
-		t.Errorf("secrets lost on partial PATCH: %+v", cfg)
+	if cfg.B2AppKey != "supersecret" || cfg.WebhookSecret != "hmac-key" || !cfg.RecordInbound {
+		t.Errorf("secrets/toggle lost on partial PATCH: %+v", cfg)
 	}
 }
 

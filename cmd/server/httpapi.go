@@ -466,6 +466,33 @@ func (s *server) doAccept(sess *Session, w http.ResponseWriter, r *http.Request)
 		return
 	}
 	s.broker.emitIncomingClaimed(sess.id, id, owner)
+
+	// Recording of this incoming call: an explicit `record` on the accept wins;
+	// otherwise the session's "record inbound" default (recording-config) decides.
+	var body struct {
+		Record   bool   `json:"record"`
+		ClinicID string `json:"clinicId"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&body)
+	if rec := sess.mgr.rec; rec != nil {
+		wantRec := body.Record
+		if !wantRec {
+			if cfg, cErr := s.recStore.config(r.Context(), sess.id, rec.secrets); cErr == nil {
+				wantRec = cfg.RecordInbound
+			}
+		}
+		if wantRec {
+			peer := ""
+			if cr, _ := s.broker.getCall(id); cr != nil {
+				peer = cr.Peer
+			}
+			rec.arm(recMeta{
+				callID: id, sessionID: sess.id, clinicID: strings.TrimSpace(body.ClinicID),
+				direction: "inbound", peer: peer,
+			})
+		}
+	}
+
 	if err := ac.cm.AcceptCall(r.Context(), id); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return

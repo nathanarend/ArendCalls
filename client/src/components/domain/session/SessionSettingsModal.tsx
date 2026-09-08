@@ -16,6 +16,7 @@ type RecForm = {
   b2Prefix: string;
   webhookUrl: string;
   urlTtlSeconds: number;
+  recordInbound: boolean;
 };
 
 const emptyRecForm: RecForm = {
@@ -26,6 +27,7 @@ const emptyRecForm: RecForm = {
   b2Prefix: "",
   webhookUrl: "",
   urlTtlSeconds: 0,
+  recordInbound: false,
 };
 
 const toRecForm = (c: RecordingConfig): RecForm => ({
@@ -36,6 +38,7 @@ const toRecForm = (c: RecordingConfig): RecForm => ({
   b2Prefix: c.b2Prefix,
   webhookUrl: c.webhookUrl,
   urlTtlSeconds: c.urlTtlSeconds,
+  recordInbound: c.recordInbound,
 });
 
 export const SessionSettingsModal = ({
@@ -291,6 +294,23 @@ export const SessionSettingsModal = ({
                   <span className="text-xs text-muted-foreground">0 = enviar só a chave; o Mocho assina a URL.</span>
                 </div>
               </div>
+
+              <label className="flex items-start gap-2.5 text-sm border-t border-dashed pt-3">
+                <input
+                  type="checkbox"
+                  className="mt-0.5 h-4 w-4 rounded border-border accent-primary"
+                  checked={recForm.recordInbound}
+                  onChange={(e) => setRecField("recordInbound", e.target.checked)}
+                />
+                <span>
+                  Gravar toda chamada recebida atendida
+                  <span className="block text-xs text-muted-foreground">
+                    Sem isso, uma chamada recebida só grava se o app passar <code>record: true</code> no{" "}
+                    <code>POST .../accept</code>. Chamadas de saída são sempre por chamada
+                    (<code>record</code> no <code>POST /calls</code>).
+                  </span>
+                </span>
+              </label>
 
               <Button
                 variant="secondary"
