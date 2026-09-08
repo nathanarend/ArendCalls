@@ -14,9 +14,6 @@ RUN npm run build
 FROM golang:alpine AS builder-backend
 WORKDIR /app
 
-# Instalar GCC e dependências necessárias para compilar CGO (SQLite)
-RUN apk add --no-cache gcc musl-dev build-base
-
 # Copiar os arquivos de dependência Go
 COPY go.mod go.sum ./
 RUN go mod download
@@ -24,8 +21,9 @@ RUN go mod download
 # Copiar o restante do código fonte
 COPY . .
 
-# Compilar o binário
-RUN CGO_ENABLED=1 GOOS=linux go build -o arendcalls ./cmd/server
+# Compilar o binário. modernc.org/sqlite é Go puro — sem CGO, sem toolchain C,
+# binário estático. -trimpath + -s -w encolhem o binário (~39 MB -> ~28 MB).
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o arendcalls ./cmd/server
 
 # --- Stage 3: Imagem Final (Alpine) ---
 FROM alpine:latest
@@ -54,6 +52,12 @@ VOLUME ["/app/data"]
 
 # Opcional: Variável de ambiente padrão
 ENV API_KEY=""
+
+# Runtime tuning. GOGC=200: deixa o heap crescer ~3x antes de coletar (menos CPU
+# gasto em GC no hot path de áudio, ~1.5x de pico de heap a mais). Em produção,
+# defina GOMEMLIMIT ~= 75% do limite de memória do container (ex:
+# -e GOMEMLIMIT=1500MiB) para o GC ficar mais agressivo perto do teto.
+ENV GOGC=200
 
 # Iniciar o servidor apontando os estáticos para a pasta correta e o banco para o diretório de dados
 ENTRYPOINT ["/app/arendcalls", "-addr", "0.0.0.0:8080", "-static", "/app/client/dist", "-db", "/app/data/wacalls.db"]

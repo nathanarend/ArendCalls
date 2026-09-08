@@ -1,13 +1,16 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"flag"
 	"log/slog"
 	"net/http"
+	"net/http/pprof"
 	"os"
 	"os/signal"
+	"runtime"
 	"syscall"
 	"time"
 )
@@ -19,6 +22,7 @@ func main() {
 	debug := flag.Bool("debug", false, "Enable debug logging")
 	maxCalls := flag.Int("max-calls", 0, "Max concurrent calls per session (0 = unlimited)")
 	apiKeyFlag := flag.String("apikey", "", "Global API Key for admin access (overrides API_KEY env var)")
+	pprofAddr := flag.String("pprof", "", "If set, serve net/http/pprof on this address (bind to localhost, e.g. 127.0.0.1:6060 — never expose publicly)")
 	flag.Parse()
 
 	logLevel := slog.LevelInfo
@@ -26,6 +30,25 @@ func main() {
 		logLevel = slog.LevelDebug
 	}
 	log := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: logLevel}))
+
+	log.Info("runtime",
+		"gomaxprocs", runtime.GOMAXPROCS(0), "numcpu", runtime.NumCPU(),
+		"gogc", cmp.Or(os.Getenv("GOGC"), "100"), "gomemlimit", cmp.Or(os.Getenv("GOMEMLIMIT"), "off"))
+
+	if *pprofAddr != "" {
+		pmux := http.NewServeMux()
+		pmux.HandleFunc("/debug/pprof/", pprof.Index)
+		pmux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
+		pmux.HandleFunc("/debug/pprof/profile", pprof.Profile)
+		pmux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
+		pmux.HandleFunc("/debug/pprof/trace", pprof.Trace)
+		go func() {
+			log.Warn("pprof listener enabled — do not expose this port publicly", "addr", *pprofAddr)
+			if err := http.ListenAndServe(*pprofAddr, pmux); err != nil {
+				log.Error("pprof listener error", "err", err)
+			}
+		}()
+	}
 
 	apiKey := *apiKeyFlag
 	if apiKey == "" {
