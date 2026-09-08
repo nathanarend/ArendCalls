@@ -49,7 +49,7 @@ const RecordingRow = ({ r }: { r: RecordingItem }) => (
     </p>
     {r.status === "ready" && (
       <p className="text-xs text-muted-foreground truncate">
-        B2: <code>{r.b2Key}</code> · Mocho {r.notified ? "avisado" : "pendente"}
+        B2: <code>{r.b2Key}</code> · webhook {r.notified ? "avisado" : "pendente"}
       </p>
     )}
     {r.status === "failed" && (

@@ -59,7 +59,7 @@ export const recordingRoutes: RouteInfo[] = [
       b2KeyId: "0045abc...",
       b2AppKey: "K004...",
       b2Prefix: "clinica-x",
-      webhookUrl: "https://seu-app.com/api/arendcalls/recording-ready",
+      webhookUrl: "https://api.seusistema.com/webhooks/gravacao-pronta",
       webhookSecret: "segredo-hmac-compartilhado",
       urlTtlSeconds: 0,
       recordInbound: false,
@@ -106,7 +106,7 @@ export const recordingRoutes: RouteInfo[] = [
   {
     method: "GET",
     path: "/api/sessions/{sid}/calls/{id}/recording-info",
-    purpose: "Metadados da gravação de UMA chamada — usado pelo Mocho para reconciliar quando o webhook 'gravação pronta' se perdeu. 404 se a chamada não foi gravada.",
+    purpose: "Metadados da gravação de UMA chamada — para o app consumidor reconciliar quando o webhook 'gravação pronta' se perdeu. 404 se a chamada não foi gravada.",
     response: {
       callId: "1A2B3C...",
       sessionId: "SUA_SESSION_ID",

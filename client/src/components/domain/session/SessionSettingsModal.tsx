@@ -191,7 +191,7 @@ export const SessionSettingsModal = ({
               <p className="text-xs text-muted-foreground">
                 Quando uma chamada é iniciada com <code>record: true</code> no <code>POST /calls</code>,
                 o ArendCalls grava em WAV estéreo (atendente à esquerda, cliente à direita),
-                envia para o bucket Backblaze B2 abaixo e avisa o Mocho por webhook assinado.
+                envia para o bucket Backblaze B2 abaixo e avisa o app consumidor por webhook assinado.
                 <strong className="text-foreground"> B2 e webhook são obrigatórios juntos</strong> — preencha os
                 dois ou deixe tudo vazio.
                 {rec ? null : " Carregando..."}
@@ -262,11 +262,11 @@ export const SessionSettingsModal = ({
 
               <div className="grid gap-3 sm:grid-cols-2 border-t border-dashed pt-3">
                 <div className="flex flex-col gap-1 sm:col-span-2">
-                  <Label className="text-xs text-muted-foreground">Webhook "gravação pronta" (Mocho)</Label>
+                  <Label className="text-xs text-muted-foreground">Webhook "gravação pronta"</Label>
                   <Input
                     value={recForm.webhookUrl}
                     onChange={(e) => setRecField("webhookUrl", e.target.value)}
-                    placeholder="https://mocho.example/api/calls/recording-ready"
+                    placeholder="https://api.seusistema.com/webhooks/gravacao-pronta"
                     className="font-mono text-sm"
                   />
                 </div>
@@ -291,7 +291,7 @@ export const SessionSettingsModal = ({
                     onChange={(e) => setRecField("urlTtlSeconds", Math.max(0, Number(e.target.value) || 0))}
                     className="font-mono text-sm"
                   />
-                  <span className="text-xs text-muted-foreground">0 = enviar só a chave; o Mocho assina a URL.</span>
+                  <span className="text-xs text-muted-foreground">0 = enviar só a chave; o app consumidor assina a URL.</span>
                 </div>
               </div>
 

@@ -12,7 +12,7 @@ export type SessionInfo = {
 // RecordingConfig mirrors the redacted payload of GET /api/sessions/{sid}/recording-config.
 // Secrets are never returned — b2AppKeySet / webhookSecretSet only say whether one is stored.
 // Whether a call is recorded is decided per call by the `record` field on POST /calls,
-// not here; this is only the destination (B2 bucket + Mocho webhook).
+// not here; this is only the destination (B2 bucket + webhook).
 export type RecordingConfig = {
   sessionId: string;
   complete: boolean;
