@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Plus, Trash2, Pencil, BookOpen, Settings, Activity, Disc3 } from "lucide-react";
+import { Plus, Trash2, Pencil, BookOpen, Settings, Activity } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -57,18 +57,7 @@ export const Sidebar = ({ onNavigate }: { onNavigate?: () => void }) => {
           >
             <Activity className="h-4 w-4" />
           </button>
-          <button
-            onClick={() => {
-              setActiveSession("recording-settings"); // special ID for global recording config
-              onNavigate?.();
-            }}
-            className="text-muted-foreground hover:text-foreground transition-colors p-1"
-            title="Configurações de Gravação"
-            aria-label="Configurações de Gravação"
-          >
-            <Disc3 className="h-4 w-4" />
-          </button>
-          <button
+          <button 
             onClick={() => {
               setActiveSession("api-docs"); // special ID for docs
               onNavigate?.();

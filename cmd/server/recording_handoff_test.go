@@ -81,8 +81,8 @@ func TestRecordingHandoffUploadsVerifiesAndNotifies(t *testing.T) {
 	}))
 	defer mocho.Close()
 
-	if err := store.saveGlobalConfig(ctx, RecordingConfig{
-
+	if err := store.saveConfig(ctx, RecordingConfig{
+		SessionID:  "sess-1",
 		B2Endpoint: b2.URL, B2Region: "us-west-004", B2Bucket: "recs",
 		B2KeyID: "kid", B2AppKey: "akey", B2Prefix: "tenantA",
 		WebhookURL: mocho.URL, WebhookSecret: "s3cr3t", URLTTLSeconds: 900,
@@ -154,8 +154,8 @@ func TestRecordingHandoffFailsOnSizeMismatch(t *testing.T) {
 	mocho := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(200) }))
 	defer mocho.Close()
 
-	_ = store.saveGlobalConfig(ctx, RecordingConfig{
-		B2Endpoint: b2.URL, B2Bucket: "recs", B2KeyID: "k", B2AppKey: "a",
+	_ = store.saveConfig(ctx, RecordingConfig{
+		SessionID: "sess-1", B2Endpoint: b2.URL, B2Bucket: "recs", B2KeyID: "k", B2AppKey: "a",
 		WebhookURL: mocho.URL, WebhookSecret: "x",
 	}, ctl.secrets)
 	local := writeDummyWav(t, dir, callID+".wav", 100)
@@ -186,8 +186,8 @@ func TestRecordingHandoffRetriesOnWebhookFailure(t *testing.T) {
 	mochoFail := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(500) }))
 	defer mochoFail.Close()
 
-	_ = store.saveGlobalConfig(ctx, RecordingConfig{
-		B2Endpoint: b2.URL, B2Bucket: "recs", B2KeyID: "k", B2AppKey: "a",
+	_ = store.saveConfig(ctx, RecordingConfig{
+		SessionID: "sess-1", B2Endpoint: b2.URL, B2Bucket: "recs", B2KeyID: "k", B2AppKey: "a",
 		WebhookURL: mochoFail.URL, WebhookSecret: "x",
 	}, ctl.secrets)
 	local := writeDummyWav(t, dir, callID+".wav", 512)
@@ -233,8 +233,8 @@ func TestRecordingHandoffIncompleteConfigKeepsLocal(t *testing.T) {
 	const callID = "call-h3"
 
 	// Only B2, no webhook — config is not complete.
-	_ = store.saveGlobalConfig(ctx, RecordingConfig{
-		B2Endpoint: "https://x", B2Bucket: "b", B2KeyID: "k", B2AppKey: "a",
+	_ = store.saveConfig(ctx, RecordingConfig{
+		SessionID: "sess-x", B2Endpoint: "https://x", B2Bucket: "b", B2KeyID: "k", B2AppKey: "a",
 	}, ctl.secrets)
 	local := writeDummyWav(t, dir, callID+".wav", 256)
 	_ = store.begin(ctx, RecordingRow{CallID: callID, SessionID: "sess-x", LocalPath: local, Channels: "stereo", StartedAt: time.Now().UnixMilli()})

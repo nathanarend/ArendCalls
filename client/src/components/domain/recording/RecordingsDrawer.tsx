@@ -89,7 +89,7 @@ export const RecordingsDrawer = ({ sid }: { sid: string }) => {
             <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-xs flex gap-2">
               <AlertTriangle className="h-4 w-4 shrink-0 text-amber-500" />
               <span>
-                Destino de gravação incompleto. Configure B2 e webhook juntos em Configurações de Gravação (menu lateral).
+                Destino de gravação incompleto. Configure B2 e webhook juntos em Configurações da conta.
                 {data.missing.length > 0 && ` Falta: ${data.missing.join(", ")}.`}
               </span>
             </div>

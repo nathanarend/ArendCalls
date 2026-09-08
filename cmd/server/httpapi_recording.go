@@ -6,9 +6,9 @@ import (
 	"strings"
 )
 
-// recordingConfigBody is the PATCH payload for the instance-wide recording
-// destination. Every field is a pointer so a PATCH touches only what it sends;
-// secrets left out keep their stored value, secrets sent as "" are cleared.
+// recordingConfigBody is the PATCH payload for per-session recording setup.
+// Every field is a pointer so a PATCH touches only what it sends; secrets left
+// out keep their stored value, secrets sent as "" are cleared.
 type recordingConfigBody struct {
 	B2Endpoint    *string `json:"b2Endpoint"`
 	B2Region      *string `json:"b2Region"`
@@ -19,17 +19,20 @@ type recordingConfigBody struct {
 	WebhookURL    *string `json:"webhookUrl"`
 	WebhookSecret *string `json:"webhookSecret"`
 	URLTTLSeconds *int    `json:"urlTtlSeconds"`
-	RecordInbound *bool   `json:"recordInbound"`
 }
 
 func (s *server) handleSetRecordingConfig(w http.ResponseWriter, r *http.Request) {
+	sess := s.sessionByID(w, r.PathValue("sid"))
+	if sess == nil {
+		return
+	}
 	var body recordingConfigBody
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
 		return
 	}
 
-	cur, err := s.recStore.globalConfig(r.Context(), s.rec.secrets)
+	cur, err := s.recStore.config(r.Context(), sess.id, s.rec.secrets)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -46,12 +49,11 @@ func (s *server) handleSetRecordingConfig(w http.ResponseWriter, r *http.Request
 	if body.URLTTLSeconds != nil {
 		cur.URLTTLSeconds = *body.URLTTLSeconds
 	}
-	if body.RecordInbound != nil {
-		cur.RecordInbound = *body.RecordInbound
-	}
+	cur.SessionID = sess.id
 
-	// B2 and the webhook are mutually required: the destination is either
-	// complete or fully empty. Anything in between cannot deliver a recording.
+	// B2 and the Mocho webhook are mutually required: a session either has a
+	// complete recording destination or none at all. Anything in between cannot
+	// deliver a recording, so it is rejected.
 	if !cur.complete() && !cur.isEmpty() {
 		writeJSON(w, http.StatusBadRequest, map[string]any{
 			"error":   "recording config must be complete (B2 endpoint, bucket, key id, app key, webhook URL and webhook secret) or fully empty",
@@ -60,7 +62,7 @@ func (s *server) handleSetRecordingConfig(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	if err := s.recStore.saveGlobalConfig(r.Context(), cur, s.rec.secrets); err != nil {
+	if err := s.recStore.saveConfig(r.Context(), cur, s.rec.secrets); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
@@ -104,7 +106,7 @@ func (s *server) handleListRecordings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	stats, _ := s.recStore.sessionRecordingStats(r.Context(), sess.id)
-	cfg, _ := s.recStore.globalConfig(r.Context(), s.rec.secrets)
+	cfg, _ := s.recStore.config(r.Context(), sess.id, s.rec.secrets)
 
 	items := make([]map[string]any, 0, len(rows))
 	for _, row := range rows {
@@ -120,7 +122,11 @@ func (s *server) handleListRecordings(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) handleGetRecordingConfig(w http.ResponseWriter, r *http.Request) {
-	cfg, err := s.recStore.globalConfig(r.Context(), s.rec.secrets)
+	sess := s.sessionByID(w, r.PathValue("sid"))
+	if sess == nil {
+		return
+	}
+	cfg, err := s.recStore.config(r.Context(), sess.id, s.rec.secrets)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -162,6 +168,7 @@ func setStr(dst *string, src *string) {
 // redactedConfig echoes the config back without leaking secret values.
 func redactedConfig(c RecordingConfig) map[string]any {
 	return map[string]any{
+		"sessionId":        c.SessionID,
 		"complete":         c.complete(),
 		"b2Endpoint":       c.B2Endpoint,
 		"b2Region":         c.B2Region,
@@ -172,7 +179,6 @@ func redactedConfig(c RecordingConfig) map[string]any {
 		"webhookUrl":       c.WebhookURL,
 		"webhookSecretSet": c.WebhookSecret != "",
 		"urlTtlSeconds":    c.URLTTLSeconds,
-		"recordInbound":    c.RecordInbound,
 	}
 }
 

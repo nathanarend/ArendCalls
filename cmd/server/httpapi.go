@@ -34,13 +34,13 @@ func (s *server) routes() http.Handler {
 	mux.HandleFunc("DELETE /api/sessions/{sid}/calls/{id}", s.handleEndCall)
 	mux.HandleFunc("GET /api/sessions/{sid}/history", s.handleHistory)
 	mux.HandleFunc("POST /api/sessions/{sid}/check-number", s.handleCheckNumber)
+	mux.HandleFunc("GET /api/sessions/{sid}/recording-config", s.handleGetRecordingConfig)
+	mux.HandleFunc("PATCH /api/sessions/{sid}/recording-config", s.handleSetRecordingConfig)
 	mux.HandleFunc("GET /api/sessions/{sid}/recordings", s.handleListRecordings)
 	mux.HandleFunc("GET /api/sessions/{sid}/calls/{id}/recording-info", s.handleRecordingInfo)
 
 	mux.HandleFunc("GET /api/events", s.handleEvents)
 	mux.HandleFunc("GET /api/system/metrics", s.handleSystemMetrics)
-	mux.HandleFunc("GET /api/recording-config", s.handleGetRecordingConfig)
-	mux.HandleFunc("PATCH /api/recording-config", s.handleSetRecordingConfig)
 
 	mux.HandleFunc("GET /api/sessions/{sid}/events", s.handleSessionEvents)
 
@@ -466,33 +466,6 @@ func (s *server) doAccept(sess *Session, w http.ResponseWriter, r *http.Request)
 		return
 	}
 	s.broker.emitIncomingClaimed(sess.id, id, owner)
-
-	// Recording of this incoming call: an explicit `record` on the accept wins;
-	// otherwise the instance-wide "record inbound" toggle decides.
-	var body struct {
-		Record   bool   `json:"record"`
-		ClinicID string `json:"clinicId"`
-	}
-	_ = json.NewDecoder(r.Body).Decode(&body)
-	if rec := sess.mgr.rec; rec != nil {
-		wantRec := body.Record
-		if !wantRec {
-			if cfg, cErr := s.recStore.globalConfig(r.Context(), rec.secrets); cErr == nil {
-				wantRec = cfg.RecordInbound
-			}
-		}
-		if wantRec {
-			peer := ""
-			if cr, _ := s.broker.getCall(id); cr != nil {
-				peer = cr.Peer
-			}
-			rec.arm(recMeta{
-				callID: id, sessionID: sess.id, clinicID: strings.TrimSpace(body.ClinicID),
-				direction: "inbound", peer: peer,
-			})
-		}
-	}
-
 	if err := ac.cm.AcceptCall(r.Context(), id); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return

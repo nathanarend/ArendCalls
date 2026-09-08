@@ -114,10 +114,6 @@ func (c *recordingController) retryLoop() {
 }
 
 func (c *recordingController) retrySweep() {
-	// Not configured yet — the WAVs just wait on disk, not a failure to churn on.
-	if cfg, err := c.store.globalConfig(c.appCtx, c.secrets); err == nil && !cfg.complete() {
-		return
-	}
 	rows, err := c.store.pendingHandoff(c.appCtx)
 	if err != nil {
 		c.log.Warn("recording retry: sweep query failed", "err", err)
@@ -133,6 +129,11 @@ func (c *recordingController) retrySweep() {
 			continue // give up quietly; recording-info still serves the row
 		}
 		if r.LastAttemptAt != 0 && now.Sub(time.UnixMilli(r.LastAttemptAt)) < backoffFor(attempts) {
+			continue
+		}
+		// Session not fully configured yet — the WAV just waits, not a failure
+		// to churn on. A later sweep picks it up once B2 + webhook are set.
+		if cfg, err := c.store.config(c.appCtx, r.SessionID, c.secrets); err == nil && !cfg.complete() {
 			continue
 		}
 		c.enqueue(r.CallID) // dedupe drops it if a worker already has it

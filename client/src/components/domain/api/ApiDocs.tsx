@@ -168,15 +168,14 @@ export const ApiDocs = () => {
           <h2 className="text-xl font-bold text-foreground">3. Gravação de Chamadas (Servidor)</h2>
           <p className="text-sm text-muted-foreground">
             O ArendCalls grava a chamada em <strong>WAV estéreo</strong> (atendente à esquerda, cliente à direita),
-            sobe para o <strong>Backblaze B2</strong> e avisa o seu sistema por webhook assinado.
+            sobe para o <strong>Backblaze B2</strong> da conta e avisa o Mocho por webhook assinado.
           </p>
           <ul className="list-disc pl-5 text-sm text-muted-foreground space-y-1.5">
-            <li>O destino (B2 + webhook) é <strong>configurado uma vez no painel do ArendCalls</strong> (Configurações de Gravação) — vale para todas as contas. <strong>Os apps não passam credenciais.</strong></li>
-            <li><strong>Saída:</strong> grava por chamada — <code>record: true</code> no <code>POST /api/sessions/{'{sid}'}/calls</code>.</li>
-            <li><strong>Entrada:</strong> <code>record: true</code> no <code>POST /api/sessions/{'{sid}'}/calls/{'{id}'}/accept</code>, ou a opção "gravar chamadas recebidas" no painel (grava todas).</li>
+            <li>A gravação é <strong>por chamada</strong>: passe <code>record: true</code> no <code>POST /api/sessions/{'{sid}'}/calls</code>. Não há default por sessão.</li>
             <li>Só grava <strong>depois que a chamada é atendida</strong>. Gravações com menos de <strong>5 segundos</strong> são descartadas (status <code>skipped</code>).</li>
+            <li><strong>B2 e webhook são obrigatórios juntos.</strong> Sem os dois configurados, o WAV fica no disco do servidor aguardando o setup — nada é perdido.</li>
             <li>O envio passa por uma <strong>fila persistente</strong> com um pool de workers (padrão 3). Uma rajada de chamadas encerrando não vira uma rajada de uploads. Falhas são reenviadas com backoff (1min → 5min → 15min → 1h) e sobrevivem a reinício do servidor.</li>
-            <li>O arquivo local só é apagado <strong>depois</strong> do B2 confirmar (existência + tamanho). Sem o destino configurado, o WAV fica no disco aguardando — nada é perdido.</li>
+            <li>O arquivo local só é apagado <strong>depois</strong> do B2 confirmar (existência + tamanho).</li>
           </ul>
           {renderTable(recordingRoutes, "recording")}
         </div>

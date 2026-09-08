@@ -14,12 +14,11 @@ export const updateSession = (id: string, name: string) =>
 export const updateWebhookUrl = (id: string, webhook_url: string) =>
   apiPatch<{ status: string }>(`/api/sessions/${id}/webhook`, { webhook_url });
 
-/** Instance-wide recording destination — configured once in the ArendCalls panel. */
-export const getRecordingConfig = () =>
-  apiGet<RecordingConfig>(`/api/recording-config`);
+export const getRecordingConfig = (id: string) =>
+  apiGet<RecordingConfig>(`/api/sessions/${id}/recording-config`);
 
-export const updateRecordingConfig = (patch: RecordingConfigPatch) =>
-  apiPatch<RecordingConfig>(`/api/recording-config`, patch);
+export const updateRecordingConfig = (id: string, patch: RecordingConfigPatch) =>
+  apiPatch<RecordingConfig>(`/api/sessions/${id}/recording-config`, patch);
 
 export const listRecordings = (id: string) =>
   apiGet<RecordingsOverview>(`/api/sessions/${id}/recordings`);

@@ -12,7 +12,6 @@ import { ensureSessionsWired, useSessions } from "@/stores/sessions";
 import { ensureCallsWired } from "@/stores/calls";
 import { useTheme } from "@/stores/theme";
 import { ApiDocs } from "@/components/domain/api/ApiDocs";
-import { RecordingSettingsPage } from "@/pages/RecordingSettingsPage";
 
 export const App = () => {
   const sessions = useSessions((s) => s.sessions);
@@ -31,8 +30,6 @@ export const App = () => {
       <AppShell>
         {activeId === "api-docs" ? (
           <ApiDocs />
-        ) : activeId === "recording-settings" ? (
-          <RecordingSettingsPage />
         ) : sessions.length === 0 ? (
           <EmptyState
             icon={<PlusCircle className="h-6 w-6" />}
