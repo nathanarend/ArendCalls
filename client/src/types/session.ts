@@ -14,7 +14,6 @@ export type SessionInfo = {
 // Whether a call is recorded is decided per call by the `record` field on POST /calls,
 // not here; this is only the destination (B2 bucket + Mocho webhook).
 export type RecordingConfig = {
-  sessionId: string;
   complete: boolean;
   b2Endpoint: string;
   b2Region: string;
@@ -25,6 +24,7 @@ export type RecordingConfig = {
   webhookUrl: string;
   webhookSecretSet: boolean;
   urlTtlSeconds: number;
+  recordInbound: boolean;
 };
 
 // Fields accepted by PATCH /api/sessions/{sid}/recording-config. All optional:
@@ -39,6 +39,7 @@ export type RecordingConfigPatch = Partial<{
   webhookUrl: string;
   webhookSecret: string;
   urlTtlSeconds: number;
+  recordInbound: boolean;
 }>;
 
 export type RecordingStatus = "recording" | "uploading" | "ready" | "failed" | "skipped";

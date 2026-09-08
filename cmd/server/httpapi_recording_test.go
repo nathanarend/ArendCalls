@@ -83,12 +83,13 @@ var completeConfigBody = map[string]any{
 	"urlTtlSeconds": 600,
 }
 
+const recCfgBase = "/api/recording-config"
+
 func TestRecordingConfigRejectsPartial(t *testing.T) {
-	_, ts, sid := newRecTestServer(t)
-	base := "/api/sessions/" + sid + "/recording-config"
+	_, ts, _ := newRecTestServer(t)
 
 	// B2 without the webhook → rejected.
-	resp, got := recDo(t, ts, http.MethodPatch, base, map[string]any{
+	resp, got := recDo(t, ts, http.MethodPatch, recCfgBase, map[string]any{
 		"b2Endpoint": "https://x", "b2Bucket": "b", "b2KeyId": "k", "b2AppKey": "a",
 	})
 	if resp.StatusCode != 400 {
@@ -100,17 +101,16 @@ func TestRecordingConfigRejectsPartial(t *testing.T) {
 	}
 
 	// Nothing was persisted.
-	_, got = recDo(t, ts, http.MethodGet, base, nil)
+	_, got = recDo(t, ts, http.MethodGet, recCfgBase, nil)
 	if got["b2Bucket"] != "" || got["complete"] != false {
 		t.Errorf("rejected config leaked into storage: %v", got)
 	}
 }
 
 func TestRecordingConfigAcceptsCompleteAndEmpty(t *testing.T) {
-	_, ts, sid := newRecTestServer(t)
-	base := "/api/sessions/" + sid + "/recording-config"
+	_, ts, _ := newRecTestServer(t)
 
-	resp, got := recDo(t, ts, http.MethodPatch, base, completeConfigBody)
+	resp, got := recDo(t, ts, http.MethodPatch, recCfgBase, completeConfigBody)
 	if resp.StatusCode != 200 {
 		t.Fatalf("complete config rejected: %d %v", resp.StatusCode, got)
 	}
@@ -119,40 +119,39 @@ func TestRecordingConfigAcceptsCompleteAndEmpty(t *testing.T) {
 	}
 
 	// Clearing everything is allowed.
-	resp, _ = recDo(t, ts, http.MethodPatch, base, map[string]any{
+	resp, _ = recDo(t, ts, http.MethodPatch, recCfgBase, map[string]any{
 		"b2Endpoint": "", "b2Bucket": "", "b2KeyId": "", "b2AppKey": "",
 		"webhookUrl": "", "webhookSecret": "", "urlTtlSeconds": 0,
 	})
 	if resp.StatusCode != 200 {
 		t.Fatalf("clearing config rejected: %d", resp.StatusCode)
 	}
-	_, got = recDo(t, ts, http.MethodGet, base, nil)
+	_, got = recDo(t, ts, http.MethodGet, recCfgBase, nil)
 	if got["complete"] != false || got["b2Bucket"] != "" {
 		t.Errorf("config not cleared: %v", got)
 	}
 }
 
 func TestRecordingConfigPartialUpdateKeepsComplete(t *testing.T) {
-	srv, ts, sid := newRecTestServer(t)
-	base := "/api/sessions/" + sid + "/recording-config"
+	srv, ts, _ := newRecTestServer(t)
 
-	if resp, got := recDo(t, ts, http.MethodPatch, base, completeConfigBody); resp.StatusCode != 200 {
+	if resp, got := recDo(t, ts, http.MethodPatch, recCfgBase, completeConfigBody); resp.StatusCode != 200 {
 		t.Fatalf("seed config: %d %v", resp.StatusCode, got)
 	}
-	// Change only the bucket — the rest (incl. secrets) must survive and stay complete.
-	if resp, _ := recDo(t, ts, http.MethodPatch, base, map[string]any{"b2Bucket": "recs-2"}); resp.StatusCode != 200 {
+	// Change only the bucket + toggle recordInbound — secrets must survive and stay complete.
+	if resp, _ := recDo(t, ts, http.MethodPatch, recCfgBase, map[string]any{"b2Bucket": "recs-2", "recordInbound": true}); resp.StatusCode != 200 {
 		t.Fatal("partial PATCH failed")
 	}
-	_, got := recDo(t, ts, http.MethodGet, base, nil)
-	if got["b2Bucket"] != "recs-2" || got["complete"] != true {
+	_, got := recDo(t, ts, http.MethodGet, recCfgBase, nil)
+	if got["b2Bucket"] != "recs-2" || got["complete"] != true || got["recordInbound"] != true {
 		t.Errorf("partial PATCH broke config: %v", got)
 	}
-	cfg, err := srv.recStore.config(context.Background(), sid, srv.rec.secrets)
+	cfg, err := srv.recStore.globalConfig(context.Background(), srv.rec.secrets)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.B2AppKey != "supersecret" || cfg.WebhookSecret != "hmac-key" {
-		t.Errorf("secrets lost on partial PATCH: %+v", cfg)
+	if cfg.B2AppKey != "supersecret" || cfg.WebhookSecret != "hmac-key" || !cfg.RecordInbound {
+		t.Errorf("secrets/toggle lost on partial PATCH: %+v", cfg)
 	}
 }
 

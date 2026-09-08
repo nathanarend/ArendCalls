@@ -27,7 +27,7 @@ func (c *recordingController) processRecording(callID string) {
 		return // nothing left to do
 	}
 
-	cfg, err := c.store.config(ctx, row.SessionID, c.secrets)
+	cfg, err := c.store.globalConfig(ctx, c.secrets)
 	if err != nil {
 		c.log.Error("recording handoff: config read failed", "call", callID, "err", err)
 		return
