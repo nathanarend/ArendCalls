@@ -123,7 +123,7 @@ func (m *SessionManager) Restore(ctx context.Context) error {
 		if row.JID == "" {
 			device := m.container.NewDevice()
 			client := whatsmeow.NewClient(device, m.waLogger)
-			s := newSession(m, row.ID, row.Name, row.WebhookURL, client)
+			s := newSession(m, row.ID, row.Name, row.WebhookURL, row.PanelInbound, client)
 			s.auth = AuthSnapshot{State: "logged_out", Paired: false}
 			m.register(s)
 			continue
@@ -133,7 +133,7 @@ func (m *SessionManager) Restore(ctx context.Context) error {
 			m.log.Warn("session has unparseable jid; preserving session in logged_out state", "session", row.ID, "jid", row.JID)
 			device := m.container.NewDevice()
 			client := whatsmeow.NewClient(device, m.waLogger)
-			s := newSession(m, row.ID, row.Name, row.WebhookURL, client)
+			s := newSession(m, row.ID, row.Name, row.WebhookURL, row.PanelInbound, client)
 			s.auth = AuthSnapshot{State: "logged_out", Paired: false}
 			m.register(s)
 			continue
@@ -143,13 +143,13 @@ func (m *SessionManager) Restore(ctx context.Context) error {
 			m.log.Warn("session device not found; preserving session in logged_out state", "session", row.ID, "jid", row.JID)
 			device = m.container.NewDevice()
 			client := whatsmeow.NewClient(device, m.waLogger)
-			s := newSession(m, row.ID, row.Name, row.WebhookURL, client)
+			s := newSession(m, row.ID, row.Name, row.WebhookURL, row.PanelInbound, client)
 			s.auth = AuthSnapshot{State: "logged_out", Paired: false}
 			m.register(s)
 			continue
 		}
 		client := whatsmeow.NewClient(device, m.waLogger)
-		s := newSession(m, row.ID, row.Name, row.WebhookURL, client)
+		s := newSession(m, row.ID, row.Name, row.WebhookURL, row.PanelInbound, client)
 		m.register(s)
 		if err := s.connect(ctx); err != nil {
 			m.log.Error("session connect failed", "session", row.ID, "err", err)
@@ -167,7 +167,7 @@ func (m *SessionManager) Create(name string) (string, error) {
 	}
 	device := m.container.NewDevice()
 	client := whatsmeow.NewClient(device, m.waLogger)
-	s := newSession(m, id, name, "", client)
+	s := newSession(m, id, name, "", true, client)
 	m.register(s)
 	m.broker.emitSessionList(m.infos())
 	if err := s.startPairing(m.appCtx); err != nil {
@@ -308,7 +308,6 @@ func (m *SessionManager) disconnectAll() {
 	}
 }
 
-
 func (m *SessionManager) SetWebhookURL(ctx context.Context, id, webhookURL string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -329,6 +328,24 @@ func (m *SessionManager) SetWebhookURL(ctx context.Context, id, webhookURL strin
 	return nil
 }
 
+func (m *SessionManager) SetPanelInbound(ctx context.Context, id string, enabled bool) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	s, ok := m.sessions[id]
+	if !ok {
+		return fmt.Errorf("no session %s", id)
+	}
+	if err := m.store.setPanelInbound(ctx, id, enabled); err != nil {
+		return fmt.Errorf("update panel_inbound in store: %w", err)
+	}
+	s.mu.Lock()
+	s.panelInbound = enabled
+	s.mu.Unlock()
+	m.broker.emitSessionList(m.infosLocked())
+	return nil
+}
+
 func (m *SessionManager) SessionCounts() (total int, connected int) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -343,4 +360,3 @@ func (m *SessionManager) SessionCounts() (total int, connected int) {
 	}
 	return total, connected
 }
-

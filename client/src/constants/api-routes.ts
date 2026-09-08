@@ -17,6 +17,7 @@ export const adminRoutes: RouteInfo[] = [
 export const sessionRoutes: RouteInfo[] = [
   { method: "PATCH", path: "/api/sessions/{sid}", purpose: "Renomear uma conta existente", payload: { name: "Novo Nome da Conta" }, requiresSid: true },
   { method: "PATCH", path: "/api/sessions/{sid}/webhook", purpose: "Definir URL de Webhook de eventos (Ringing/Accepted/Terminated) específica desta conta", payload: { webhook_url: "https://seu-crm.com/api/webhook" }, requiresSid: true },
+  { method: "PATCH", path: "/api/sessions/{sid}/panel-inbound", purpose: "Liga/desliga o painel web tocar e mostrar as chamadas recebidas desta conta. Desligado = conta só via webhook/API (os eventos SSE/webhook continuam sendo emitidos normalmente).", payload: { enabled: false }, response: { status: "ok", panelInbound: false }, requiresSid: true },
   { method: "DELETE", path: "/api/sessions/{sid}", purpose: "Fazer logout e remover uma conta", requiresSid: true },
   { method: "POST", path: "/api/sessions/{sid}/logout", purpose: "Desconectar uma conta (manter para re-parear)", requiresSid: true },
   { method: "POST", path: "/api/sessions/{sid}/pair", purpose: "Re-parear uma conta (emitir novo QR)", requiresSid: true },

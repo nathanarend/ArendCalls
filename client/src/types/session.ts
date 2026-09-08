@@ -7,6 +7,8 @@ export type SessionInfo = {
   state: SessionState;
   paired: boolean;
   webhookUrl?: string;
+  /** false = o painel não toca/mostra chamadas recebidas desta conta (só webhook/API). */
+  panelInbound?: boolean;
 };
 
 // RecordingConfig mirrors the redacted payload of GET /api/sessions/{sid}/recording-config.

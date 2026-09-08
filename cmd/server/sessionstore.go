@@ -8,10 +8,11 @@ import (
 )
 
 type sessionRow struct {
-	ID         string
-	Name       string
-	JID        string
-	WebhookURL string
+	ID           string
+	Name         string
+	JID          string
+	WebhookURL   string
+	PanelInbound bool // show/ring incoming calls for this account in the panel UI
 }
 
 type sessionStore struct{ db *sql.DB }
@@ -21,13 +22,15 @@ func newSessionStore(ctx context.Context, db *sql.DB) (*sessionStore, error) {
 		id   TEXT PRIMARY KEY,
 		name TEXT NOT NULL,
 		jid  TEXT,
-		webhook_url TEXT
+		webhook_url TEXT,
+		panel_inbound INTEGER DEFAULT 1
 	)`)
 	if err != nil {
 		return nil, err
 	}
-	// Add column if it doesn't exist (for existing DBs)
+	// Add columns if they don't exist (for existing DBs).
 	db.ExecContext(ctx, `ALTER TABLE sessions ADD COLUMN webhook_url TEXT`)
+	db.ExecContext(ctx, `ALTER TABLE sessions ADD COLUMN panel_inbound INTEGER DEFAULT 1`)
 	return &sessionStore{db: db}, nil
 }
 
@@ -38,7 +41,7 @@ func newSessionID() string {
 }
 
 func (s *sessionStore) list(ctx context.Context) ([]sessionRow, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, name, COALESCE(jid, ''), COALESCE(webhook_url, '') FROM sessions ORDER BY rowid`)
+	rows, err := s.db.QueryContext(ctx, `SELECT id, name, COALESCE(jid, ''), COALESCE(webhook_url, ''), COALESCE(panel_inbound, 1) FROM sessions ORDER BY rowid`)
 	if err != nil {
 		return nil, err
 	}
@@ -46,9 +49,11 @@ func (s *sessionStore) list(ctx context.Context) ([]sessionRow, error) {
 	var out []sessionRow
 	for rows.Next() {
 		var r sessionRow
-		if err := rows.Scan(&r.ID, &r.Name, &r.JID, &r.WebhookURL); err != nil {
+		var panelInbound int
+		if err := rows.Scan(&r.ID, &r.Name, &r.JID, &r.WebhookURL, &panelInbound); err != nil {
 			return nil, err
 		}
+		r.PanelInbound = panelInbound != 0
 		out = append(out, r)
 	}
 	return out, rows.Err()
@@ -81,5 +86,14 @@ func (s *sessionStore) setWebhookURL(ctx context.Context, id, webhookURL string)
 	} else {
 		_, err = s.db.ExecContext(ctx, `UPDATE sessions SET webhook_url = ? WHERE id = ?`, webhookURL, id)
 	}
+	return err
+}
+
+func (s *sessionStore) setPanelInbound(ctx context.Context, id string, enabled bool) error {
+	v := 0
+	if enabled {
+		v = 1
+	}
+	_, err := s.db.ExecContext(ctx, `UPDATE sessions SET panel_inbound = ? WHERE id = ?`, v, id)
 	return err
 }

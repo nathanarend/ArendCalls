@@ -21,11 +21,12 @@ import (
 )
 
 type Session struct {
-	id         string
-	name       string
-	webhookURL string
-	mgr        *SessionManager
-	log        *slog.Logger
+	id           string
+	name         string
+	webhookURL   string
+	panelInbound bool
+	mgr          *SessionManager
+	log          *slog.Logger
 
 	client *whatsmeow.Client
 	reg    *callRegistry
@@ -34,16 +35,17 @@ type Session struct {
 	auth AuthSnapshot
 }
 
-func newSession(mgr *SessionManager, id, name, webhookURL string, client *whatsmeow.Client) *Session {
+func newSession(mgr *SessionManager, id, name, webhookURL string, panelInbound bool, client *whatsmeow.Client) *Session {
 	s := &Session{
-		id:         id,
-		name:       name,
-		webhookURL: webhookURL,
-		mgr:        mgr,
-		log:        mgr.log.With("session", id),
-		client:     client,
-		auth:       AuthSnapshot{State: "connecting"},
-		reg:        newCallRegistry(),
+		id:           id,
+		name:         name,
+		webhookURL:   webhookURL,
+		panelInbound: panelInbound,
+		mgr:          mgr,
+		log:          mgr.log.With("session", id),
+		client:       client,
+		auth:         AuthSnapshot{State: "connecting"},
+		reg:          newCallRegistry(),
 	}
 	client.AddEventHandler(s.handleEvent)
 	return s
@@ -429,12 +431,13 @@ func (s *Session) info() SessionInfo {
 	s.mu.Lock()
 	a := s.auth
 	webhookURL := s.webhookURL
+	panelInbound := s.panelInbound
 	s.mu.Unlock()
 	jid := ""
 	if id := s.client.Store.ID; id != nil {
 		jid = id.String()
 	}
-	return SessionInfo{ID: s.id, Name: s.name, JID: jid, State: a.State, Paired: a.Paired || jid != "", QR: a.QR, WebhookURL: webhookURL}
+	return SessionInfo{ID: s.id, Name: s.name, JID: jid, State: a.State, Paired: a.Paired || jid != "", QR: a.QR, WebhookURL: webhookURL, PanelInbound: panelInbound}
 }
 
 func (s *Session) setBridge(callID string, b *Bridge) {

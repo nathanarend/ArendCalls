@@ -37,13 +37,14 @@ type AuthSnapshot struct {
 }
 
 type SessionInfo struct {
-	ID         string `json:"id"`
-	Name       string `json:"name"`
-	JID        string `json:"jid"`
-	State      string `json:"state"`
-	Paired     bool   `json:"paired"`
-	QR         string `json:"qr,omitempty"`
-	WebhookURL string `json:"webhookUrl,omitempty"`
+	ID           string `json:"id"`
+	Name         string `json:"name"`
+	JID          string `json:"jid"`
+	State        string `json:"state"`
+	Paired       bool   `json:"paired"`
+	QR           string `json:"qr,omitempty"`
+	WebhookURL   string `json:"webhookUrl,omitempty"`
+	PanelInbound bool   `json:"panelInbound"`
 }
 
 type subscriber struct {
@@ -110,7 +111,7 @@ func (b *Broker) broadcast(ev any) {
 
 	for s := range b.subs {
 		payload := ev
-		
+
 		// If the subscriber is limited to a session, filter/discard events
 		if s.sessionID != "" {
 			if m, ok := ev.(map[string]any); ok {
@@ -118,7 +119,7 @@ func (b *Broker) broadcast(ev any) {
 				if m["type"] == "session-list" {
 					continue
 				}
-				
+
 				// 2. Filter call-list to only include calls for this session
 				if m["type"] == "call-list" {
 					if calls, ok := m["calls"].([]CallRecord); ok {
@@ -389,4 +390,3 @@ func (b *Broker) ActiveCallCount() int {
 	defer b.mu.RUnlock()
 	return len(b.calls)
 }
-

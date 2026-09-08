@@ -5,7 +5,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
-import { updateWebhookUrl, getRecordingConfig, updateRecordingConfig } from "@/services/sessions";
+import { updateWebhookUrl, getRecordingConfig, updateRecordingConfig, setPanelInbound } from "@/services/sessions";
 import type { SessionInfo, RecordingConfig, RecordingConfigPatch } from "@/types/session";
 
 type RecForm = {
@@ -52,6 +52,8 @@ export const SessionSettingsModal = ({
 }) => {
   const [webhookUrl, setWebhookUrl] = useState("");
   const [isSavingWebhook, setIsSavingWebhook] = useState(false);
+  const [panelInbound, setPanelInboundState] = useState(true);
+  const [isSavingPanel, setIsSavingPanel] = useState(false);
 
   const [rec, setRec] = useState<RecordingConfig | null>(null);
   const [recForm, setRecForm] = useState<RecForm>(emptyRecForm);
@@ -62,6 +64,7 @@ export const SessionSettingsModal = ({
   useEffect(() => {
     if (!session) return;
     setWebhookUrl(session.webhookUrl || "");
+    setPanelInboundState(session.panelInbound !== false);
     setRec(null);
     setRecForm(emptyRecForm);
     setB2AppKey("");
@@ -85,6 +88,22 @@ export const SessionSettingsModal = ({
       toast.error("Erro ao salvar webhook.");
     } finally {
       setIsSavingWebhook(false);
+    }
+  };
+
+  const handleTogglePanelInbound = async (enabled: boolean) => {
+    if (!session) return;
+    const prev = panelInbound;
+    setPanelInboundState(enabled);
+    setIsSavingPanel(true);
+    try {
+      await setPanelInbound(session.id, enabled);
+      onUpdateSession({ ...session, panelInbound: enabled });
+    } catch {
+      setPanelInboundState(prev);
+      toast.error("Erro ao salvar a preferência de atendimento pelo painel.");
+    } finally {
+      setIsSavingPanel(false);
     }
   };
 
@@ -167,6 +186,23 @@ export const SessionSettingsModal = ({
                   Salvar URL de Webhook
                 </Button>
               </div>
+
+              <label className="flex items-start gap-2.5 text-sm border-t border-dashed pt-3">
+                <input
+                  type="checkbox"
+                  className="mt-0.5 h-4 w-4 rounded border-border accent-primary"
+                  checked={panelInbound}
+                  disabled={isSavingPanel}
+                  onChange={(e) => handleTogglePanelInbound(e.target.checked)}
+                />
+                <span>
+                  Atender chamadas recebidas por este painel
+                  <span className="block text-xs text-muted-foreground">
+                    Desligado: as chamadas recebidas desta conta <strong>não tocam nem aparecem</strong> aqui —
+                    ficam só para o webhook/API tratar. Útil quando a VPS tem muitas contas e este painel é só administrativo.
+                  </span>
+                </span>
+              </label>
             </div>
           </div>
 
@@ -294,23 +330,6 @@ export const SessionSettingsModal = ({
                   <span className="text-xs text-muted-foreground">0 = enviar só a chave; o app consumidor assina a URL.</span>
                 </div>
               </div>
-
-              <label className="flex items-start gap-2.5 text-sm border-t border-dashed pt-3">
-                <input
-                  type="checkbox"
-                  className="mt-0.5 h-4 w-4 rounded border-border accent-primary"
-                  checked={recForm.recordInbound}
-                  onChange={(e) => setRecField("recordInbound", e.target.checked)}
-                />
-                <span>
-                  Gravar toda chamada recebida atendida
-                  <span className="block text-xs text-muted-foreground">
-                    Sem isso, uma chamada recebida só grava se o app passar <code>record: true</code> no{" "}
-                    <code>POST .../accept</code>. Chamadas de saída são sempre por chamada
-                    (<code>record</code> no <code>POST /calls</code>).
-                  </span>
-                </span>
-              </label>
 
               <Button
                 variant="secondary"

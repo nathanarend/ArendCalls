@@ -19,6 +19,7 @@ func (s *server) routes() http.Handler {
 	mux.HandleFunc("POST /api/sessions", s.handleSessionCreate)
 	mux.HandleFunc("PATCH /api/sessions/{sid}", s.handleSessionRename)
 	mux.HandleFunc("PATCH /api/sessions/{sid}/webhook", s.handleSessionWebhook)
+	mux.HandleFunc("PATCH /api/sessions/{sid}/panel-inbound", s.handleSessionPanelInbound)
 	mux.HandleFunc("DELETE /api/sessions/{sid}", s.handleSessionDelete)
 	mux.HandleFunc("POST /api/sessions/{sid}/logout", s.handleSessionLogout)
 	mux.HandleFunc("POST /api/sessions/{sid}/pair", s.handleSessionPair)
@@ -198,6 +199,25 @@ func (s *server) handleSessionWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+// handleSessionPanelInbound toggles whether the web panel rings/shows incoming
+// calls for this account. Off = the account is API/webhook-only; the call still
+// fires the SSE/webhook events, the panel just stays quiet.
+func (s *server) handleSessionPanelInbound(w http.ResponseWriter, r *http.Request) {
+	sid := r.PathValue("sid")
+	var body struct {
+		Enabled bool `json:"enabled"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
+		return
+	}
+	if err := s.sessions.SetPanelInbound(r.Context(), sid, body.Enabled); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "panelInbound": body.Enabled})
 }
 
 func (s *server) handleSessionDelete(w http.ResponseWriter, r *http.Request) {

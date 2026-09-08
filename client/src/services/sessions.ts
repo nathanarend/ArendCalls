@@ -14,6 +14,10 @@ export const updateSession = (id: string, name: string) =>
 export const updateWebhookUrl = (id: string, webhook_url: string) =>
   apiPatch<{ status: string }>(`/api/sessions/${id}/webhook`, { webhook_url });
 
+/** Liga/desliga o painel tocar e mostrar chamadas recebidas desta conta. */
+export const setPanelInbound = (id: string, enabled: boolean) =>
+  apiPatch<{ status: string; panelInbound: boolean }>(`/api/sessions/${id}/panel-inbound`, { enabled });
+
 export const getRecordingConfig = (id: string) =>
   apiGet<RecordingConfig>(`/api/sessions/${id}/recording-config`);
 
