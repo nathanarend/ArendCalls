@@ -57,3 +57,10 @@ Para garantir que o status avance corretamente de "Ligando..." para "Chamando...
   - `internal/voip/call/callstate.go`: `TransitionRemoteAccepted` agora é idempotente para o estado `Connecting` e aceita transições a partir de `IncomingRinging`.
 - **Exclusividade Automática contra Atendimento Duplo**:
   - `cmd/server/httpapi.go`: `/api/sessions/{sid}/calls/{id}/accept` agora gera internamente um identificador único de claim para cada requisição de atendimento. A primeira requisição que chega tranca a chamada exclusivamente e qualquer tentativa concorrente simultânea recebe `409 Conflict` (*"claimed by another client"*), de forma 100% transparente para as aplicações externas e CRMs.
+
+## Auditoria de Ciclo de Vida e Duração de Chamadas
+- **Investigação de Limite de 1 Minuto (Concluída)**:
+  - Auditoria completa de timers no servidor Go (`session.go`, `httpapi.go`, `sctprelay.go`, `callmanager_media.go`).
+  - Constatado que não existe corte ou timeout forçado de 60 segundos para chamadas ativas.
+  - Verificação na base de dados de chamadas reais confirmando durações de até 310 segundos (5+ min).
+  - Documentação consolidada em `docs/INVESTIGACAO-DURACAO-CHAMADAS.md`.

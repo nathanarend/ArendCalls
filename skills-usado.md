@@ -16,3 +16,5 @@
 - Tratamento de falhas transitórias em sinalização VoIP: implementação de retentativas com intervalo (exponential backoff / retry) e propagação correta de status HTTP (`404` para inexistente, `502` para falha de envio de sinalização, `204/200` para sucesso).
 - Resolução de conflitos de concorrência em ambiente multi-operador com validação de `X-Client-Id` obrigatório em endpoints de claim/accept.
 - Robustez e resiliência na máquina de estados de chamadas do WhatsApp: idempotência em `TransitionRemoteAccepted` e resolução de JID com fallback para pacotes `CallAccept` sem `call-id` explícito.
+- Auditoria sistemática de ciclo de vida e timers de chamadas VoIP (análise de `time.Timer`, SCTP keepalives, RTP silence generator e rotas HTTP).
+- Validação empírica de métricas de chamadas ativas na base de dados de produção.
