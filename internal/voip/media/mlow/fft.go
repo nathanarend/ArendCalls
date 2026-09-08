@@ -23,6 +23,43 @@ func (a cpx) mul(b cpx) cpx {
 	}
 }
 
+// twiddleCache memoizes, per transform length n, the n-th roots of unity
+//
+//	w[m] = exp(-i·2π·m/n)   (forward, sign = -1)
+//
+// fftRec used to recompute these with math.Cos/math.Sin inside its inner loops on
+// every call — profiling put math.Cos alone at ~45% of the whole encoder. Only n
+// distinct values are ever needed (the angle is 2π·(a·b mod n)/n), and only a
+// handful of lengths occur in practice (512 for LPC, 576 for the perceptual
+// model, plus the radix-split sub-lengths), so after warm-up this is pure
+// read-only lookups. Computing the table at 2π·m/n in float64 also keeps the
+// angle in [0, 2π) instead of letting math.Cos see a large, precision-losing
+// float32 argument for high bins — closer to the reference FFT, not further.
+var twiddleCache sync.Map // twiddleKey -> []cpx
+
+type twiddleKey struct {
+	n       int
+	forward bool
+}
+
+func twiddles(n int, forward bool) []cpx {
+	key := twiddleKey{n, forward}
+	if v, ok := twiddleCache.Load(key); ok {
+		return v.([]cpx)
+	}
+	sign := 1.0
+	if forward {
+		sign = -1.0 // forward: w[m] = exp(-i·2π·m/n)
+	}
+	t := make([]cpx, n)
+	for m := 0; m < n; m++ {
+		s, c := math.Sincos(sign * 2.0 * math.Pi * float64(m) / float64(n))
+		t[m] = cpx{re: float32(c), im: float32(s)}
+	}
+	v, _ := twiddleCache.LoadOrStore(key, t)
+	return v.([]cpx)
+}
+
 // smallestFactor returns the smallest prime factor of n (>= 2).
 func smallestFactor(n int) int {
 	// Source of truth: https://github.com/oxidezap/whatsapp-rust/blob/674e85164b35ca19115dfebcf605708d15951ee7/wacore/src/voip/mlow/smpl_perc.rs#L346-L358
@@ -65,15 +102,16 @@ func fftRec(x []cpx, stride, n int, sign float32, out []cpx, scratch []cpx) {
 		return
 	}
 	p := smallestFactor(n)
+	tw := twiddles(n, sign < 0) // w[m] = exp(±i·2π·m/n), indexed by (a·b) mod n
 	if p == n {
-		invN := 1.0 / float32(n)
 		for k := 0; k < n; k++ {
 			var acc cpx
-			angK := sign * 2.0 * smplPI * float32(k) * invN
+			mi := 0 // (k·j) mod n, advanced by k each step
 			for j := 0; j < n; j++ {
-				ang := angK * float32(j)
-				w := cpx{re: float32(math.Cos(float64(ang))), im: float32(math.Sin(float64(ang)))}
-				acc = acc.add(x[j*stride].mul(w))
+				acc = acc.add(x[j*stride].mul(tw[mi]))
+				if mi += k; mi >= n {
+					mi -= n
+				}
 			}
 			out[k] = acc
 		}
@@ -85,15 +123,15 @@ func fftRec(x []cpx, stride, n int, sign float32, out []cpx, scratch []cpx) {
 	for q := 0; q < p; q++ {
 		fftRec(x[q*stride:], stride*p, m, sign, sub[q*m:(q+1)*m], nextScratch)
 	}
-	invN := 1.0 / float32(n)
 	for k := 0; k < n; k++ {
 		kmod := k % m
 		var acc cpx
-		angK := sign * 2.0 * smplPI * float32(k) * invN
+		mi := 0 // (k·q) mod n, advanced by k each step
 		for q := 0; q < p; q++ {
-			ang := angK * float32(q)
-			tw := cpx{re: float32(math.Cos(float64(ang))), im: float32(math.Sin(float64(ang)))}
-			acc = acc.add(sub[q*m+kmod].mul(tw))
+			acc = acc.add(sub[q*m+kmod].mul(tw[mi]))
+			if mi += k; mi >= n {
+				mi -= n
+			}
 		}
 		out[k] = acc
 	}
