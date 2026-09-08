@@ -20,6 +20,8 @@ func (s *server) routes() http.Handler {
 	mux.HandleFunc("PATCH /api/sessions/{sid}", s.handleSessionRename)
 	mux.HandleFunc("PATCH /api/sessions/{sid}/webhook", s.handleSessionWebhook)
 	mux.HandleFunc("PATCH /api/sessions/{sid}/panel-inbound", s.handleSessionPanelInbound)
+	mux.HandleFunc("GET /api/panel-settings", s.handleGetPanelSettings)
+	mux.HandleFunc("PATCH /api/panel-settings", s.handleSetPanelSettings)
 	mux.HandleFunc("DELETE /api/sessions/{sid}", s.handleSessionDelete)
 	mux.HandleFunc("POST /api/sessions/{sid}/logout", s.handleSessionLogout)
 	mux.HandleFunc("POST /api/sessions/{sid}/pair", s.handleSessionPair)
@@ -201,9 +203,9 @@ func (s *server) handleSessionWebhook(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
-// handleSessionPanelInbound toggles whether the web panel rings/shows incoming
-// calls for this account. Off = the account is API/webhook-only; the call still
-// fires the SSE/webhook events, the panel just stays quiet.
+// handleSessionPanelInbound sets the per-account override: force-show this
+// account's incoming calls in the panel even when the global switch is off
+// (a test bypass). It never hides — the global switch does that.
 func (s *server) handleSessionPanelInbound(w http.ResponseWriter, r *http.Request) {
 	sid := r.PathValue("sid")
 	var body struct {
@@ -218,6 +220,27 @@ func (s *server) handleSessionPanelInbound(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "panelInbound": body.Enabled})
+}
+
+func (s *server) handleGetPanelSettings(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{"inboundCalls": s.sessions.PanelInboundCalls()})
+}
+
+// handleSetPanelSettings flips the global "panel shows incoming calls" switch.
+// A per-account override can still force-show individual accounts (logical OR).
+func (s *server) handleSetPanelSettings(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		InboundCalls bool `json:"inboundCalls"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
+		return
+	}
+	if err := s.sessions.SetPanelInboundCalls(r.Context(), body.InboundCalls); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "inboundCalls": body.InboundCalls})
 }
 
 func (s *server) handleSessionDelete(w http.ResponseWriter, r *http.Request) {

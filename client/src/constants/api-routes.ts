@@ -11,13 +11,15 @@ export const adminRoutes: RouteInfo[] = [
   { method: "GET", path: "/api/sessions", purpose: "Listar todas as contas (id, nome, jid, status, pareamento)" },
   { method: "POST", path: "/api/sessions", purpose: "Criar uma conta e iniciar o pareamento QR", payload: { name: "Minha Nova Conta" } },
   { method: "GET", path: "/api/system/metrics", purpose: "Obter telemetria em tempo real do ArendCalls e recursos da VPS (RAM, CPU, Uptime, Disco)" },
+  { method: "GET", path: "/api/panel-settings", purpose: "Ler o switch global 'o painel mostra chamadas recebidas'", response: { inboundCalls: true } },
+  { method: "PATCH", path: "/api/panel-settings", purpose: "Ligar/desligar globalmente a exibição de chamadas recebidas no painel. Uma conta com override ligado ainda aparece (OU lógico).", payload: { inboundCalls: false }, response: { status: "ok", inboundCalls: false } },
   { method: "GET", path: "/api/events", purpose: "Eventos Server-Sent globais e disparo de Webhooks em paralelo" },
 ];
 
 export const sessionRoutes: RouteInfo[] = [
   { method: "PATCH", path: "/api/sessions/{sid}", purpose: "Renomear uma conta existente", payload: { name: "Novo Nome da Conta" }, requiresSid: true },
   { method: "PATCH", path: "/api/sessions/{sid}/webhook", purpose: "Definir URL de Webhook de eventos (Ringing/Accepted/Terminated) específica desta conta", payload: { webhook_url: "https://seu-crm.com/api/webhook" }, requiresSid: true },
-  { method: "PATCH", path: "/api/sessions/{sid}/panel-inbound", purpose: "Liga/desliga o painel web tocar e mostrar as chamadas recebidas desta conta. Desligado = conta só via webhook/API (os eventos SSE/webhook continuam sendo emitidos normalmente).", payload: { enabled: false }, response: { status: "ok", panelInbound: false }, requiresSid: true },
+  { method: "PATCH", path: "/api/sessions/{sid}/panel-inbound", purpose: "Override por conta: força mostrar as chamadas recebidas desta conta no painel mesmo com o switch global desligado (bypass de teste). Nunca esconde — quem esconde é o switch global (/api/panel-settings). OU lógico: global OU override.", payload: { enabled: true }, response: { status: "ok", panelInbound: true }, requiresSid: true },
   { method: "DELETE", path: "/api/sessions/{sid}", purpose: "Fazer logout e remover uma conta", requiresSid: true },
   { method: "POST", path: "/api/sessions/{sid}/logout", purpose: "Desconectar uma conta (manter para re-parear)", requiresSid: true },
   { method: "POST", path: "/api/sessions/{sid}/pair", purpose: "Re-parear uma conta (emitir novo QR)", requiresSid: true },

@@ -52,14 +52,16 @@ const startRingLoop = (): RingHandle | null => {
 export const IncomingCallModal = () => {
   const incoming = useCalls((s) => s.incoming);
   const sessions = useSessions((s) => s.sessions);
+  const panelInboundCalls = useSessions((s) => s.panelInboundCalls);
   const micId = useDevices((s) => s.micId);
   const accept = useAcceptCall(micId);
   const reject = useRejectCall();
   const busy = accept.isPending || reject.isPending;
 
   const session = incoming ? sessions.find((s) => s.id === incoming.sessionId) : undefined;
-  // Contas marcadas como "não atender pelo painel" não tocam nem abrem o modal.
-  const show = !!incoming && session?.panelInbound !== false;
+  // OU lógico: mostra se o switch global está ligado OU esta conta tem o
+  // override ligado (bypass de teste).
+  const show = !!incoming && (panelInboundCalls || session?.panelInbound === true);
 
   useEffect(() => {
     if (!show) {

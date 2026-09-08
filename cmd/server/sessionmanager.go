@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/store/sqlstore"
@@ -23,13 +24,14 @@ type SessionManager struct {
 	log       *slog.Logger
 	maxCalls  int
 
-	mu       sync.RWMutex
-	sessions map[string]*Session
-	order    []string
+	mu               sync.RWMutex
+	sessions         map[string]*Session
+	order            []string
+	panelInboundCall atomic.Bool // global switch: panel shows incoming calls
 }
 
 func newSessionManager(ctx context.Context, container *sqlstore.Container, broker *Broker, store *sessionStore, waLogger waLog.Logger, log *slog.Logger, maxCalls int) *SessionManager {
-	return &SessionManager{
+	m := &SessionManager{
 		appCtx:    ctx,
 		container: container,
 		broker:    broker,
@@ -39,6 +41,8 @@ func newSessionManager(ctx context.Context, container *sqlstore.Container, broke
 		maxCalls:  maxCalls,
 		sessions:  map[string]*Session{},
 	}
+	m.panelInboundCall.Store(true)
+	return m
 }
 
 func (m *SessionManager) register(s *Session) {
@@ -102,7 +106,10 @@ func (m *SessionManager) infos() []SessionInfo {
 }
 
 func (m *SessionManager) snapshotEvents() []any {
-	return []any{map[string]any{"type": "session-list", "sessions": m.infos()}}
+	return []any{map[string]any{
+		"type": "session-list", "sessions": m.infos(),
+		"panelInboundCalls": m.PanelInboundCalls(),
+	}}
 }
 
 func (m *SessionManager) getWebhookURL(id string) string {
@@ -114,7 +121,25 @@ func (m *SessionManager) getWebhookURL(id string) string {
 	return ""
 }
 
+// PanelInboundCalls is the global "panel shows incoming calls" switch.
+func (m *SessionManager) PanelInboundCalls() bool { return m.panelInboundCall.Load() }
+
+// SetPanelInboundCalls flips the global switch and broadcasts the change.
+func (m *SessionManager) SetPanelInboundCalls(ctx context.Context, enabled bool) error {
+	if err := m.store.setPanelInboundCalls(ctx, enabled); err != nil {
+		return err
+	}
+	m.panelInboundCall.Store(enabled)
+	m.broker.emitSessionList(m.infos())
+	return nil
+}
+
 func (m *SessionManager) Restore(ctx context.Context) error {
+	if enabled, err := m.store.panelInboundCalls(ctx); err == nil {
+		m.panelInboundCall.Store(enabled)
+	} else {
+		m.panelInboundCall.Store(true)
+	}
 	rows, err := m.store.list(ctx)
 	if err != nil {
 		return err

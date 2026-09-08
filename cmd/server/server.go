@@ -70,6 +70,7 @@ func newServer(ctx context.Context, dbPath, staticDir, apiKey, recDir string, ma
 	mgr.rec = rec
 	broker.SnapshotFn = mgr.snapshotEvents
 	broker.GetWebhookURLFn = mgr.getWebhookURL
+	broker.GetPanelInboundFn = mgr.PanelInboundCalls
 
 	tokenBytes := make([]byte, 16)
 	rand.Read(tokenBytes)

@@ -14,7 +14,7 @@ type CallListRow = {
 };
 
 export type BrokerEvent =
-  | { type: "session-list"; sessions: SessionInfo[] }
+  | { type: "session-list"; sessions: SessionInfo[]; panelInboundCalls?: boolean }
   | { type: "session-qr"; sessionId: string; qr: string }
   | { type: "auth-state"; sessionId: string; paired: boolean; state: SessionState; qr?: string }
   | { type: "call-list"; calls: CallListRow[] }

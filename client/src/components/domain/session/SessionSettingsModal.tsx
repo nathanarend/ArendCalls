@@ -52,7 +52,7 @@ export const SessionSettingsModal = ({
 }) => {
   const [webhookUrl, setWebhookUrl] = useState("");
   const [isSavingWebhook, setIsSavingWebhook] = useState(false);
-  const [panelInbound, setPanelInboundState] = useState(true);
+  const [panelInbound, setPanelInboundState] = useState(false);
   const [isSavingPanel, setIsSavingPanel] = useState(false);
 
   const [rec, setRec] = useState<RecordingConfig | null>(null);
@@ -64,7 +64,7 @@ export const SessionSettingsModal = ({
   useEffect(() => {
     if (!session) return;
     setWebhookUrl(session.webhookUrl || "");
-    setPanelInboundState(session.panelInbound !== false);
+    setPanelInboundState(session.panelInbound === true);
     setRec(null);
     setRecForm(emptyRecForm);
     setB2AppKey("");
@@ -196,10 +196,10 @@ export const SessionSettingsModal = ({
                   onChange={(e) => handleTogglePanelInbound(e.target.checked)}
                 />
                 <span>
-                  Atender chamadas recebidas por este painel
+                  Forçar exibição das chamadas recebidas desta conta no painel
                   <span className="block text-xs text-muted-foreground">
-                    Desligado: as chamadas recebidas desta conta <strong>não tocam nem aparecem</strong> aqui —
-                    ficam só para o webhook/API tratar. Útil quando a VPS tem muitas contas e este painel é só administrativo.
+                    Bypass de teste: mostra as chamadas <strong>desta conta</strong> aqui mesmo com o switch global
+                    de recebimento <strong>desligado</strong>. Nunca esconde — quem esconde é o switch global.
                   </span>
                 </span>
               </label>

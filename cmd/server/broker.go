@@ -59,8 +59,9 @@ type Broker struct {
 	calls   map[string]*CallRecord
 	history []CallRecord
 
-	SnapshotFn      func() []any
-	GetWebhookURLFn func(sessionID string) string
+	SnapshotFn        func() []any
+	GetWebhookURLFn   func(sessionID string) string
+	GetPanelInboundFn func() bool
 }
 
 func NewBroker() *Broker {
@@ -164,7 +165,11 @@ func (b *Broker) emitAuthState(sessionID string, a AuthSnapshot) {
 }
 
 func (b *Broker) emitSessionList(sessions []SessionInfo) {
-	b.broadcast(map[string]any{"type": "session-list", "sessions": sessions})
+	panelInbound := true
+	if b.GetPanelInboundFn != nil {
+		panelInbound = b.GetPanelInboundFn()
+	}
+	b.broadcast(map[string]any{"type": "session-list", "sessions": sessions, "panelInboundCalls": panelInbound})
 }
 
 func (b *Broker) emitSessionQR(sessionID, qr string) {

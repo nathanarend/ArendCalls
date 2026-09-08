@@ -14,9 +14,17 @@ export const updateSession = (id: string, name: string) =>
 export const updateWebhookUrl = (id: string, webhook_url: string) =>
   apiPatch<{ status: string }>(`/api/sessions/${id}/webhook`, { webhook_url });
 
-/** Liga/desliga o painel tocar e mostrar chamadas recebidas desta conta. */
+/** Override por conta: força mostrar as chamadas recebidas desta conta no painel
+ *  mesmo com o switch global desligado (bypass p/ teste). Nunca esconde. */
 export const setPanelInbound = (id: string, enabled: boolean) =>
   apiPatch<{ status: string; panelInbound: boolean }>(`/api/sessions/${id}/panel-inbound`, { enabled });
+
+/** Switch global: o painel mostra chamadas recebidas ou não. */
+export const getPanelSettings = () =>
+  apiGet<{ inboundCalls: boolean }>(`/api/panel-settings`);
+
+export const setPanelInboundCalls = (inboundCalls: boolean) =>
+  apiPatch<{ status: string; inboundCalls: boolean }>(`/api/panel-settings`, { inboundCalls });
 
 export const getRecordingConfig = (id: string) =>
   apiGet<RecordingConfig>(`/api/sessions/${id}/recording-config`);
