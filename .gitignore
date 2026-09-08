@@ -42,10 +42,13 @@ Thumbs.db
 .env.*
 !.env.example
 
-# Binaries generated
-arendcalls_bin
-bridge
-server
+# Binaries generated — anchored to repo root; the loose "server" pattern was
+# shadowing the whole cmd/server/ package directory.
+/arendcalls_bin
+/bridge
+/server
+/wacalls
+/wacalls-server
 
 # Keys and certificates
 *.pem
