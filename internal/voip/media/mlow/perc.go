@@ -184,7 +184,10 @@ func percRc2a(rc []float32, order int, a []float32) {
 // rfftBackwardOrdered: inverse real FFT from the ordered REAL layout, unnormalized.
 func rfftBackwardOrdered(f []float32, time []float32) {
 	n := len(f)
-	spec := make([]cpx, n)
+	buf, release := getCpxScratch(2 * n)
+	defer release()
+	spec := buf[:n] // fully overwritten below (indices 0, n/2, and 1..n-1)
+	tout := buf[n:] // written by cfft
 	spec[0] = cpx{f[0], 0}
 	spec[n/2] = cpx{f[1], 0}
 	for i := 1; i < n/2; i++ {
@@ -193,7 +196,6 @@ func rfftBackwardOrdered(f []float32, time []float32) {
 		spec[i] = cpx{re, im}
 		spec[n-i] = cpx{re, -im}
 	}
-	tout := make([]cpx, n)
 	cfft(spec, tout, 1.0)
 	for i := 0; i < n; i++ {
 		time[i] = tout[i].re
