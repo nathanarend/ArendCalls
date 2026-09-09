@@ -12,7 +12,7 @@
 [![pion](https://img.shields.io/badge/pion-WebRTC-FF6B6B)](https://github.com/pion/webrtc)
 [![Licença](https://img.shields.io/badge/licen%C3%A7a-MIT-green.svg)](#-licença)
 
-[Diferenciais](#-principais-recursos-e-diferenciais) · [Início Rápido (Docker)](#-início-rápido-com-docker-recomendado) · [Como Funciona](#-como-funciona-o-fluxo-de-chamada) · [Arquitetura](#-arquitetura) · [Rotas da API](#-endpoints-da-api) · [Autenticação](#-segurança-e-autenticação)
+[Diferenciais](#-principais-recursos-e-diferenciais) · [Início Rápido (Docker)](#-início-rápido-com-docker-recomendado) · [Como Funciona](#-como-funciona-o-fluxo-de-chamada) · [Arquitetura](#-arquitetura) · [Rotas da API](#-endpoints-da-api) · [Gravação](#-gravação-de-chamada-no-servidor) · [Autenticação](#-segurança-e-autenticação)
 
 </div>
 
@@ -25,12 +25,13 @@ O **ArendCalls** permite conectar uma ou mais contas de WhatsApp via **QR code**
 O áudio do microfone do navegador é transmitido como **PCM 16 kHz bruto via canal de dados WebRTC** até o servidor Go. O servidor codifica o áudio utilizando o codec **MLow** da Meta e o injeta na malha de **relays SRTP do WhatsApp**. No fluxo inverso, o áudio do interlocutor é decodificado e reproduzido em tempo real no navegador.
 
 Todo o ecossistema VoIP roda **nativamente em puro Go**:
-- Codec de voz MLow embutido
+- Codec de voz MLow embutido (otimizado — **−63% de CPU no encode** desde a v2026.20, sem perda de qualidade)
 - Empacotamento RTP/SRTP e STUN
 - Transporte de relay WebRTC/SCTP
 - Sinalização `<call>` integrada ao [**whatsmeow**](https://github.com/tulir/whatsmeow)
+- **Gravação da chamada no servidor** (WAV estéreo) com upload direto para o Backblaze B2 — opcional, por chamada
 - Cliente moderno construído em **React 19 + Tailwind CSS**
-- **Sem necessidade de CGO, compiladores C ou DLLs externas**
+- **Sem necessidade de CGO, compiladores C ou DLLs externas** (binário estático)
 
 ---
 
@@ -41,14 +42,17 @@ Este repositório (`ArendCalls`) traz diversas melhorias de engenharia e usabili
 | Recurso | Detalhes |
 |---|---|
 | 🇧🇷 **Interface 100% em Português** | Telas, modais, mensagens de erro, alertas e documentação totalmente traduzidos (pt-BR). |
+| 🎙️ **Gravação no Servidor** | O ArendCalls grava a chamada (WAV estéreo, atendente/cliente separados), sobe para o Backblaze B2 e avisa por webhook assinado (HMAC). O navegador do atendente não grava nem sobe áudio. Ativação por chamada. |
+| 📴 **Controle de Chamadas Recebidas no Painel** | Interruptor global para o painel exibir (ou não) chamadas recebidas, com override por conta. Permite usar o painel como console administrativo enquanto SSE/webhooks seguem disparando. |
 | ⏸️ **Modo Espera (Hold) Integrado** | Botão no painel de chamada para colocar o cliente em espera tocando música suave sem encerrar a ligação. |
-| 🔊 **Motor de Áudio Otimizado** | Pausa de 3 segundos entre repetições de áudio de espera e correção de concorrência no fluxo RTP (sem picotes). |
+| ⚡ **Codec MLow Otimizado** | Encode ~2,7× mais rápido (memoização de twiddles do FFT, pool de scratch da busca CELP) — saída de áudio byte a byte idêntica, mais chamadas simultâneas por VPS. |
 | 🛡️ **Autenticação Unificada** | Chave mestra global (`API_KEY`) para segurança nas integrações de backend e cookies de sessão para o painel web. |
 | 🏢 **Gerenciador Visual de Instâncias** | Criar, renomear e gerenciar múltiplas conexões de WhatsApp diretamente pela barra lateral. |
 | 💾 **Persistência Inteligente** | Contas deslogadas são mantidas salvas no banco de dados SQLite (`logged_out`), preservando IDs e webhooks. |
+| 📊 **Telemetria da VPS sob Demanda** | Modal com RAM, CPU, uptime, goroutines, disco e chamadas ativas — polling só enquanto aberto, zero overhead em background. |
 | 📖 **Guia da API Integrado** | Documentação interativa embutida na própria interface com exemplos de cURL, Webhooks e Server-Sent Events (SSE). |
 | 🔄 **Máquina de Estados Precisa** | Status claros e confiáveis: *Ligando...* (`starting`) ➔ *Chamando...* (`ringing` ao tocar) ➔ *Em chamada* (`active`). |
-| 🐳 **Pronto para Produção (Docker)** | Imagem oficial e leve no DockerHub (`nathanarend/arendcalls:latest`) com suporte nativo a Traefik. |
+| 🐳 **Pronto para Produção (Docker)** | Imagem oficial e leve no DockerHub (`nathanarend/arendcalls:latest`), binário estático sem CGO, com suporte nativo a Traefik. |
 
 ---
 
@@ -69,8 +73,15 @@ services:
     network_mode: "host"
     environment:
       - API_KEY=sua_chave_mestra_secreta_aqui
+      # Só se for usar gravação de chamada — chave AES-256-GCM (32+ bytes aleatórios)
+      # para cifrar as credenciais do B2/webhook no wacalls.db:
+      - RECORDING_CONFIG_KEY=troque_por_32_bytes_aleatorios_aqui
+      # Recomendado em produção: ~75% do limite de memória do container
+      # - GOMEMLIMIT=1500MiB
     volumes:
       - arendcalls_data:/app/data
+      # Gravações ainda não enviadas ao B2 (fila local):
+      - arendcalls_recordings:/app/recordings
     expose:
       - "8080"
     ports:
@@ -85,6 +96,8 @@ services:
 
 volumes:
   arendcalls_data:
+    driver: local
+  arendcalls_recordings:
     driver: local
 ```
 
@@ -132,6 +145,14 @@ go run ./cmd/server -addr :8080 -static client/dist
 | `-debug` | `false` | Habilita logs detalhados do WhatsApp e WebRTC |
 | `-max-calls` | `0` | Limite de chamadas simultâneas por conta (`0` = sem limite) |
 | `-apikey` | `""` | Define a Chave de Super-Usuário (sobrescreve a env `API_KEY`) |
+| `-recordings-dir` | `recordings` | Pasta para os WAVs de gravação ainda não enviados ao B2 |
+| `-recording-workers` | `3` | Workers concorrentes de upload das gravações para o B2 |
+| `-pprof` | `""` | Se definido, serve `net/http/pprof` nesse endereço (use `127.0.0.1:6060` — **nunca exponha publicamente**) |
+
+**Variáveis de ambiente relevantes:** `API_KEY` (chave mestra),
+`RECORDING_CONFIG_KEY` (AES-256-GCM para cifrar credenciais de gravação no
+`wacalls.db` — sem ela, segredos em texto puro + warning), `GOGC` (padrão `200` na
+imagem Docker), `GOMEMLIMIT` (recomendado em produção, ~75% da RAM do container).
 
 ---
 
@@ -163,22 +184,28 @@ go run ./cmd/server -addr :8080 -static client/dist
 │  Broker           Hub de eventos SSE e despachante de Webhooks              │
 │  Bridge           Pion WebRTC bridge (PCM 16 kHz ⇄ Core VoIP)               │
 │                                                                            │
-│  internal/wa      Adaptador VoipSocket sobre whatsmeow                     │
-│  internal/voip    CallManager · Sinalização · Codec MLow · Transporte SRTP │
-└───────────────┬──────────────────────────────────────┬────────────────────┘
-                │ Sinalização E2E (<call>)             │ Mídia SRTP / MLow
-                ▼                                      ▼
-        ┌───────────────┐                    ┌──────────────────────┐
-        │  WhatsApp WS  │                    │   WhatsApp Relays    │
-        │  (whatsmeow)  │                    │  (SRTP over SCTP/DC) │
-        └───────────────┘                    └──────────────────────┘
+│  internal/wa       Adaptador VoipSocket sobre whatsmeow                    │
+│  internal/voip     CallManager · Sinalização · Codec MLow · Transporte    │
+│  internal/voip/recording   Grampo paralelo · WAV estéreo · fila · upload  │
+└──────────┬────────────────────┬───────────────────────────┬───────────────┘
+           │ Sinalização        │ Mídia SRTP / MLow         │ WAV (após atender)
+           ▼                    ▼                           ▼
+   ┌───────────────┐   ┌──────────────────────┐   ┌──────────────────────┐
+   │  WhatsApp WS  │   │   WhatsApp Relays    │   │   Backblaze B2 (S3)  │
+   │  (whatsmeow)  │   │  (SRTP over SCTP/DC) │   └──────────┬───────────┘
+   └───────────────┘   └──────────────────────┘   webhook HMAC ▼
+                                                  ┌──────────────────────┐
+                                                  │    App consumidor    │
+                                                  └──────────────────────┘
 ```
 
 ---
 
 ## 📡 Endpoints da API
 
-Todas as rotas são isoladas por identificador de sessão (`{sid}`):
+Todas as rotas de API exigem autenticação (ver [Segurança](#-segurança-e-autenticação)).
+
+### Instâncias / Sessões
 
 | Método | Rota | Finalidade |
 |---|---|---|
@@ -187,17 +214,120 @@ Todas as rotas são isoladas por identificador de sessão (`{sid}`):
 | `PATCH` | `/api/sessions/{sid}` | Renomear o nome de identificação da conta |
 | `PATCH` | `/api/sessions/{sid}/webhook` | Configurar URL de webhook para eventos |
 | `DELETE` | `/api/sessions/{sid}` | Excluir e desvincular a instância |
-| `POST` | `/api/sessions/{sid}/logout` | Desconectar sessão (mantém no banco para re-parear) |
 | `POST` | `/api/sessions/{sid}/pair` | Gerar novo QR Code para uma conta desconectada |
-| `POST` | `/api/sessions/{sid}/calls` | Iniciar uma nova chamada de voz (`{ phone }`) |
+| `POST` | `/api/sessions/{sid}/logout` | Desconectar sessão (mantém no banco para re-parear) |
+| `POST` | `/api/sessions/{sid}/start` · `/restart` · `/stop` | Controlar o ciclo de vida da conexão da instância |
+| `POST` | `/api/sessions/{sid}/check-number` | Verificar se um número tem WhatsApp |
+
+### Chamadas
+
+| Método | Rota | Finalidade |
+|---|---|---|
+| `POST` | `/api/sessions/{sid}/calls` | Iniciar chamada de voz — `{ phone, record?, clinicId?, duration_ms? }` |
 | `POST` | `/api/sessions/{sid}/calls/{id}/webrtc` | Trocar SDP do WebRTC para streaming de áudio |
-| `POST` | `/api/sessions/{sid}/calls/{id}/accept` | Atender chamada recebida |
+| `POST` | `/api/sessions/{sid}/calls/{id}/accept` | Atender chamada recebida — `{ record?, clinicId? }` |
 | `POST` | `/api/sessions/{sid}/calls/{id}/reject` | Rejeitar chamada recebida |
-| `POST` | `/api/sessions/{sid}/calls/{id}/hold` | Colocar em Espera / Retomar (`{ hold: true/false }`) |
-| `DELETE` | `/api/sessions/{sid}/calls/{id}` | Desligar/Encerrar chamada ativa |
+| `POST` | `/api/sessions/{sid}/calls/{id}/hold` · `/unhold` | Colocar em espera / retomar |
+| `DELETE` | `/api/sessions/{sid}/calls/{id}` | Desligar/encerrar chamada ativa |
 | `GET` | `/api/sessions/{sid}/history` | Histórico das últimas 50 chamadas da instância |
-| `GET` | `/api/system/metrics` | Telemetria sob demanda da VPS e ArendCalls (RAM, CPU, Uptime, Disco) |
+
+### Gravação de Chamadas
+
+| Método | Rota | Finalidade |
+|---|---|---|
+| `GET` · `PATCH` | `/api/sessions/{sid}/recording-config` | Ler/definir destino da gravação da sessão (B2 + webhook; segredos redigidos na leitura; os 6 campos B2+webhook são all-or-nothing) |
+| `GET` | `/api/sessions/{sid}/recordings` | Monitoramento: estado por gravação, contagem por status, uso de disco local |
+| `GET` | `/api/sessions/{sid}/calls/{id}/recording-info` | Reconciliação: mesmo payload do webhook, para recuperar notificações perdidas |
+
+### Painel / Sistema / Eventos
+
+| Método | Rota | Finalidade |
+|---|---|---|
+| `GET` · `PATCH` | `/api/panel-settings` | Interruptor global "exibir chamadas recebidas no painel" |
+| `PATCH` | `/api/sessions/{sid}/panel-inbound` | Override por conta: forçar exibição da chamada recebida dessa conta |
+| `GET` | `/api/system/metrics` | Telemetria sob demanda da VPS e ArendCalls (RAM, CPU, uptime, disco) |
 | `GET` | `/api/events` | Stream global de eventos em tempo real (SSE) |
+| `GET` | `/api/sessions/{sid}/events` | Stream de eventos de uma sessão específica (SSE) |
+
+---
+
+## 🎙️ Gravação de Chamada no Servidor
+
+O ArendCalls — que já é o relay das duas pontas de voz — grava a chamada, gera um
+**WAV estéreo 16 kHz** (canal esquerdo = atendente, direito = cliente), sobe direto
+para o **Backblaze B2** e avisa o sistema consumidor por **webhook assinado**. O
+navegador do atendente não grava, não codifica e não sobe áudio.
+
+**Como ligar:**
+
+1. Definir o destino **por sessão** (painel → *Configurações da conta → Gravação*,
+   ou `PATCH /api/sessions/{sid}/recording-config`):
+
+   ```json
+   {
+     "b2Endpoint": "https://s3.us-west-000.backblazeb2.com",
+     "b2Region": "us-west-000",
+     "b2Bucket": "meu-bucket-privado",
+     "b2KeyId": "…",
+     "b2AppKey": "…",
+     "b2Prefix": "",
+     "webhookUrl": "https://api.seusistema.com/calls/recording-ready",
+     "webhookSecret": "…",
+     "urlTtlSeconds": 3600,
+     "recordInbound": false
+   }
+   ```
+
+   > B2 e webhook são **mutuamente obrigatórios**: ou os 6 campos (endpoint, bucket,
+   > key id, app key, webhook URL, webhook secret), ou tudo vazio. Sem configuração
+   > completa, o WAV fica no disco aguardando (não é perdido).
+
+2. Ativar **por chamada**: `record: true` no corpo do `POST /calls` (saída) ou do
+   `POST .../accept` (entrada). Alternativamente, `recordInbound: true` na config
+   grava toda chamada recebida atendida. O campo `clinicId` (opcional) entra na
+   chave do arquivo.
+
+**Fluxo:** começa quando a chamada é atendida (nunca no toque), sobrevive a
+hold/transferência, teto de 40 min, grava a duração exata pelo relógio do servidor,
+descarta gravações < 5 s. Uma **fila durável** (`call_recordings` no SQLite) drenada
+por um **pool de workers** garante que uma rajada de encerramentos não vire uma
+rajada de uploads. Depois do upload verificado (`HeadObject`), o WAV local é apagado.
+
+**Webhook "gravação pronta"** — `POST {webhookUrl}` com header
+`X-ArendCalls-Signature: sha256=<hmac>` e corpo:
+
+```json
+{
+  "callId": "…", "sessionId": "…", "clinicId": "…",
+  "recordingKey": "recordings/{clinicId}/{YYYY}/{MM}/{callId}.wav",
+  "recordingUrl": "…",
+  "durationSeconds": 143, "channels": "stereo", "mimeType": "audio/wav",
+  "startedAt": "2026-09-05T17:03:11Z", "endedAt": "2026-09-05T17:05:34Z"
+}
+```
+
+Retry com backoff (1 min / 5 min / 15 min / 1 h) persistido e retomado no boot;
+`GET .../calls/{id}/recording-info` devolve o mesmo payload para reconciliação.
+
+> **`RECORDING_CONFIG_KEY`** — defina esta env var (32+ bytes aleatórios) para que
+> as credenciais do B2 e o segredo do webhook sejam cifrados (AES-256-GCM) no
+> `wacalls.db`. Sem ela, os segredos ficam em **texto puro** e o servidor loga um
+> aviso no boot.
+
+---
+
+## 📴 Chamadas Recebidas no Painel
+
+- **Interruptor global** (`GET`/`PATCH /api/panel-settings`, default **ligado**):
+  liga/desliga a exibição de chamadas recebidas no painel para todas as contas.
+- **Override por conta** (`PATCH /api/sessions/{sid}/panel-inbound`, default
+  **desligado**): força a exibição da chamada recebida daquela conta mesmo com o
+  interruptor global desligado — é um bypass, nunca esconde.
+- Regra: `exibir = interruptor_global OU override_da_conta`.
+
+Com o painel silenciado, os eventos SSE e os webhooks de chamada recebida
+**continuam disparando** normalmente — útil para rodar o painel como console
+administrativo enquanto um app/endpoint externo atende as chamadas.
 
 ---
 
@@ -216,7 +346,10 @@ curl -X GET "https://call.seudominio.com/api/sessions" \
 curl -s -u usuario:senha "https://call.seudominio.com/api/sessions?apikey=sua_chave_mestra_aqui"
 ```
 
-> **Aviso de Segurança:** O arquivo `wacalls.db` guarda os tokens e credenciais de sessão do WhatsApp. **Nunca commite este arquivo** em repositórios públicos e mantenha seus backups protegidos.
+> **Aviso de Segurança:** O arquivo `wacalls.db` guarda os tokens e credenciais de sessão do WhatsApp, e as credenciais do B2/webhook de gravação (cifradas se `RECORDING_CONFIG_KEY` estiver definida). **Nunca commite este arquivo** em repositórios públicos e mantenha seus backups protegidos.
+
+> **pprof:** a flag `-pprof` fica desligada por padrão. Se ligar, aponte apenas para
+> `127.0.0.1` — a porta expõe profiling e não deve ficar acessível publicamente.
 
 ---
 
