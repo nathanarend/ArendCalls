@@ -74,3 +74,5 @@
 - [x] Build & Docker: Correção de arquivos ignorados indevidamente no `.gitignore` (`metrics.go`, `httpapi_test.go`), imagem Docker sem CGO (28MB), `GOGC=200`, flag `-pprof`.
 - [x] Documentação: Criação de `RELEASE_NOTES-v2026.20.md` e atualização completa do `README.md` com arquitetura, tabelas de endpoints e flags.
 - [x] Documentação: Criação do guia de handoff e deploy `docs/HANDOFF-v2026.20-push-release.md`.
+- [x] Docker: Build e publicação das imagens `nathanarend/arendcalls:v2026.20` e `nathanarend/arendcalls:latest` no DockerHub.
+- [x] GitHub: Publicação de commits e tag `v2026.20` no repositório remoto.
