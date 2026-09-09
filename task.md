@@ -59,5 +59,10 @@
   - `httpapi_test.go`: Testes atualizados para esperar 404 em vez de 200/204 para chamadas inexistentes.
 - [x] Backend: Exclusividade contra atendimento simultâneo gerenciada 100% internamente no `/accept` de forma transparente.
 - [x] Auditoria de Segurança: Verificação completa de código, commits e arquivos não rastreados (zero credenciais ou segredos expostos).
+- [x] Investigação Técnica: Verificar se o código impõe limite máximo de 1 minuto em ligações VoIP.
+  - [x] Auditoria de timers e timeouts no ArendCalls (`session.go`, `httpapi.go`, `sctprelay.go`, `callmanager_media.go`).
+  - [x] Confirmação de que o parâmetro `duration_ms` não força cancelamento em 1 minuto.
+  - [x] Verificação empírica de chamadas ativas com durações superiores a 60s (73s, 138s, 215s, 310s).
+  - [x] Diagnóstico formal documentado em `docs/INVESTIGACAO-DURACAO-CHAMADAS.md`.
 - [x] Documentação de Release: Criado arquivo `RELEASE_NOTES-v2026.19.md` para publicação no GitHub Releases da tag `v2026.19`.
 

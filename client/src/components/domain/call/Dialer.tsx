@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Disc3, Phone, AlertCircle } from "lucide-react";
+import { Phone, AlertCircle } from "lucide-react";
 import { toast } from "sonner";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -11,7 +11,6 @@ import { useSessions } from "@/stores/sessions";
 
 export const Dialer = ({ sid }: { sid: string }) => {
   const [phone, setPhone] = useState("");
-  const [record, setRecord] = useState(false);
   const micId = useDevices((s) => s.micId);
   const startCall = useStartCall(sid, micId);
   
@@ -53,7 +52,7 @@ export const Dialer = ({ sid }: { sid: string }) => {
       return;
     }
 
-    startCall.mutate({ phone: trimmed, record }, { onSuccess: () => setPhone("") });
+    startCall.mutate({ phone: trimmed }, { onSuccess: () => setPhone("") });
   };
 
   return (
@@ -82,17 +81,6 @@ export const Dialer = ({ sid }: { sid: string }) => {
             disabled={!isConnected}
             className="min-w-[200px] flex-1"
           />
-          <Button
-            type="button"
-            variant={record ? "default" : "outline"}
-            size="sm"
-            onClick={() => setRecord((v) => !v)}
-            disabled={!isConnected}
-            aria-pressed={record}
-          >
-            <Disc3 className="h-4 w-4" />
-            Gravar
-          </Button>
           <Button onClick={submit} disabled={startCall.isPending || !phone.trim() || !isConnected}>
             <Phone className="h-4 w-4" />
             {startCall.isPending ? "Chamando…" : "Ligar"}

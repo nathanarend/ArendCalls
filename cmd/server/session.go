@@ -21,11 +21,12 @@ import (
 )
 
 type Session struct {
-	id         string
-	name       string
-	webhookURL string
-	mgr        *SessionManager
-	log        *slog.Logger
+	id           string
+	name         string
+	webhookURL   string
+	panelInbound bool
+	mgr          *SessionManager
+	log          *slog.Logger
 
 	client *whatsmeow.Client
 	reg    *callRegistry
@@ -34,16 +35,17 @@ type Session struct {
 	auth AuthSnapshot
 }
 
-func newSession(mgr *SessionManager, id, name, webhookURL string, client *whatsmeow.Client) *Session {
+func newSession(mgr *SessionManager, id, name, webhookURL string, panelInbound bool, client *whatsmeow.Client) *Session {
 	s := &Session{
-		id:         id,
-		name:       name,
-		webhookURL: webhookURL,
-		mgr:        mgr,
-		log:        mgr.log.With("session", id),
-		client:     client,
-		auth:       AuthSnapshot{State: "connecting"},
-		reg:        newCallRegistry(),
+		id:           id,
+		name:         name,
+		webhookURL:   webhookURL,
+		panelInbound: panelInbound,
+		mgr:          mgr,
+		log:          mgr.log.With("session", id),
+		client:       client,
+		auth:         AuthSnapshot{State: "connecting"},
+		reg:          newCallRegistry(),
 	}
 	client.AddEventHandler(s.handleEvent)
 	return s
@@ -81,7 +83,7 @@ func (s *Session) resolvePeerName(peerStr string) string {
 			peerJID = pnJID
 		}
 	}
-	
+
 	if s.client.Store.Contacts != nil {
 		contactInfo, err := s.client.Store.Contacts.GetContact(context.Background(), peerJID)
 		if err == nil && contactInfo.Found {
@@ -149,12 +151,19 @@ func (s *Session) wireCall(cm *call.CallManager, callID string) {
 	cm.OnStateChange = func(c *call.CallInfo) {
 		if c.IsEnded() {
 			stopTimeout()
+			if s.mgr.rec != nil {
+				s.mgr.rec.onCallEnded(c.CallID)
+			}
 			s.removeCall(c.CallID)
 			s.mgr.broker.endCall(c.CallID, string(c.StateData.EndReason))
 			return
 		}
 		if c.StateData.State == core.CallStateActive || c.StateData.State == core.CallStateConnecting {
 			stopTimeout()
+		}
+		// Recording only starts once the call is answered — never while ringing.
+		if c.StateData.State == core.CallStateActive {
+			s.startRecordingIfArmed(c.CallID)
 		}
 		dir := "outbound"
 		if c.Direction == core.CallDirectionIncoming {
@@ -176,15 +185,23 @@ func (s *Session) wireCall(cm *call.CallManager, callID string) {
 	}
 	cm.OnEnded = func(c *call.CallInfo) {
 		stopTimeout()
+		if s.mgr.rec != nil {
+			s.mgr.rec.onCallEnded(c.CallID)
+		}
 		s.removeCall(c.CallID)
 		s.mgr.broker.endCall(c.CallID, string(c.StateData.EndReason))
 	}
 	cm.OnPeerAudio = func(pcm16 []float32) {
 		ac, ok := s.reg.get(callID)
-		if !ok || ac.bridge == nil {
+		if !ok {
 			return
 		}
-		_ = ac.bridge.WritePCM(pcm16)
+		if ac.bridge != nil {
+			_ = ac.bridge.WritePCM(pcm16)
+		}
+		if r := ac.rec.Load(); r != nil {
+			r.WritePeer(pcm16)
+		}
 	}
 	// Cancela o timer anti-zombie quando o relay de mídia conecta.
 	// Crucial para sessões-espelho (multi-device) que ficam em IncomingRinging
@@ -192,6 +209,24 @@ func (s *Session) wireCall(cm *call.CallManager, callID string) {
 	cm.OnRelayConnected = func() {
 		s.log.Info("relay connected: cancelling ringing timeout", "call_id", callID)
 		stopTimeout()
+		// Media is flowing, which for an outbound call means it was answered.
+		s.startRecordingIfArmed(callID)
+	}
+}
+
+// startRecordingIfArmed begins the WAV capture for a call that asked for
+// recording, once it is answered. Idempotent — fires from both the answered
+// state change and the media-relay-connected hook, whichever lands first.
+func (s *Session) startRecordingIfArmed(callID string) {
+	if s.mgr.rec == nil || !s.mgr.rec.armed(callID) {
+		return
+	}
+	ac, ok := s.reg.get(callID)
+	if !ok {
+		return
+	}
+	if r := s.mgr.rec.onAnswered(callID); r != nil {
+		ac.rec.Store(r)
 	}
 }
 
@@ -396,12 +431,13 @@ func (s *Session) info() SessionInfo {
 	s.mu.Lock()
 	a := s.auth
 	webhookURL := s.webhookURL
+	panelInbound := s.panelInbound
 	s.mu.Unlock()
 	jid := ""
 	if id := s.client.Store.ID; id != nil {
 		jid = id.String()
 	}
-	return SessionInfo{ID: s.id, Name: s.name, JID: jid, State: a.State, Paired: a.Paired || jid != "", QR: a.QR, WebhookURL: webhookURL}
+	return SessionInfo{ID: s.id, Name: s.name, JID: jid, State: a.State, Paired: a.Paired || jid != "", QR: a.QR, WebhookURL: webhookURL, PanelInbound: panelInbound}
 }
 
 func (s *Session) setBridge(callID string, b *Bridge) {

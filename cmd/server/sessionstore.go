@@ -12,6 +12,10 @@ type sessionRow struct {
 	Name       string
 	JID        string
 	WebhookURL string
+	// PanelInbound is the per-account override: force-show this account's
+	// incoming calls in the panel even when the global switch is off. It never
+	// hides — the global switch does that. Default off.
+	PanelInbound bool
 }
 
 type sessionStore struct{ db *sql.DB }
@@ -21,13 +25,24 @@ func newSessionStore(ctx context.Context, db *sql.DB) (*sessionStore, error) {
 		id   TEXT PRIMARY KEY,
 		name TEXT NOT NULL,
 		jid  TEXT,
-		webhook_url TEXT
+		webhook_url TEXT,
+		panel_inbound INTEGER DEFAULT 0
 	)`)
 	if err != nil {
 		return nil, err
 	}
-	// Add column if it doesn't exist (for existing DBs)
+	// Add columns if they don't exist (for existing DBs).
 	db.ExecContext(ctx, `ALTER TABLE sessions ADD COLUMN webhook_url TEXT`)
+	db.ExecContext(ctx, `ALTER TABLE sessions ADD COLUMN panel_inbound INTEGER DEFAULT 0`)
+
+	// Global switch: does the panel show incoming calls at all. Default on.
+	_, err = db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS panel_settings (
+		id            INTEGER PRIMARY KEY CHECK (id = 1),
+		inbound_calls INTEGER DEFAULT 1
+	)`)
+	if err != nil {
+		return nil, err
+	}
 	return &sessionStore{db: db}, nil
 }
 
@@ -37,8 +52,28 @@ func newSessionID() string {
 	return hex.EncodeToString(b)
 }
 
+// panelInboundCalls reports the global switch (default true when never set).
+func (s *sessionStore) panelInboundCalls(ctx context.Context) (bool, error) {
+	var v int
+	err := s.db.QueryRowContext(ctx, `SELECT inbound_calls FROM panel_settings WHERE id=1`).Scan(&v)
+	if err == sql.ErrNoRows {
+		return true, nil
+	}
+	return v != 0, err
+}
+
+func (s *sessionStore) setPanelInboundCalls(ctx context.Context, enabled bool) error {
+	v := 0
+	if enabled {
+		v = 1
+	}
+	_, err := s.db.ExecContext(ctx, `INSERT INTO panel_settings (id, inbound_calls) VALUES (1, ?)
+		ON CONFLICT(id) DO UPDATE SET inbound_calls=excluded.inbound_calls`, v)
+	return err
+}
+
 func (s *sessionStore) list(ctx context.Context) ([]sessionRow, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, name, COALESCE(jid, ''), COALESCE(webhook_url, '') FROM sessions ORDER BY rowid`)
+	rows, err := s.db.QueryContext(ctx, `SELECT id, name, COALESCE(jid, ''), COALESCE(webhook_url, ''), COALESCE(panel_inbound, 0) FROM sessions ORDER BY rowid`)
 	if err != nil {
 		return nil, err
 	}
@@ -46,9 +81,11 @@ func (s *sessionStore) list(ctx context.Context) ([]sessionRow, error) {
 	var out []sessionRow
 	for rows.Next() {
 		var r sessionRow
-		if err := rows.Scan(&r.ID, &r.Name, &r.JID, &r.WebhookURL); err != nil {
+		var panelInbound int
+		if err := rows.Scan(&r.ID, &r.Name, &r.JID, &r.WebhookURL, &panelInbound); err != nil {
 			return nil, err
 		}
+		r.PanelInbound = panelInbound != 0
 		out = append(out, r)
 	}
 	return out, rows.Err()
@@ -81,5 +118,14 @@ func (s *sessionStore) setWebhookURL(ctx context.Context, id, webhookURL string)
 	} else {
 		_, err = s.db.ExecContext(ctx, `UPDATE sessions SET webhook_url = ? WHERE id = ?`, webhookURL, id)
 	}
+	return err
+}
+
+func (s *sessionStore) setPanelInbound(ctx context.Context, id string, enabled bool) error {
+	v := 0
+	if enabled {
+		v = 1
+	}
+	_, err := s.db.ExecContext(ctx, `UPDATE sessions SET panel_inbound = ? WHERE id = ?`, v, id)
 	return err
 }

@@ -1,16 +1,18 @@
 import { create } from "zustand";
 import { eventStream, type BrokerEvent } from "@/lib/event-stream";
 import { getClientId } from "@/lib/client-id";
-import { listSessions } from "@/services/sessions";
+import { listSessions, getPanelSettings } from "@/services/sessions";
 import type { SessionInfo } from "@/types/session";
 
 type State = {
   sessions: SessionInfo[];
   qrs: Record<string, string>;
   activeId: string | null;
+  /** global switch: does the panel show incoming calls at all. */
+  panelInboundCalls: boolean;
 };
 
-export const useSessions = create<State>(() => ({ sessions: [], qrs: {}, activeId: null }));
+export const useSessions = create<State>(() => ({ sessions: [], qrs: {}, activeId: null, panelInboundCalls: true }));
 
 export const setActiveSession = (id: string): void => useSessions.setState({ activeId: id });
 
@@ -29,13 +31,22 @@ export const ensureSessionsWired = (): void => {
     .then((sessions) => useSessions.setState((s) => ({ sessions, activeId: pickActive(sessions, s.activeId) })))
     .catch(() => {});
 
+  void getPanelSettings()
+    .then((r) => useSessions.setState({ panelInboundCalls: r.inboundCalls }))
+    .catch(() => {});
+
   eventStream.on((ev: BrokerEvent) => {
     if (ev.type === "session-list") {
       useSessions.setState((s) => {
         const ids = new Set(ev.sessions.map((x) => x.id));
         const qrs: Record<string, string> = {};
         for (const [id, qr] of Object.entries(s.qrs)) if (ids.has(id)) qrs[id] = qr;
-        return { sessions: ev.sessions, qrs, activeId: pickActive(ev.sessions, s.activeId) };
+        return {
+          sessions: ev.sessions,
+          qrs,
+          activeId: pickActive(ev.sessions, s.activeId),
+          panelInboundCalls: ev.panelInboundCalls ?? s.panelInboundCalls,
+        };
       });
     } else if (ev.type === "session-qr") {
       useSessions.setState((s) => ({ qrs: { ...s.qrs, [ev.sessionId]: ev.qr } }));

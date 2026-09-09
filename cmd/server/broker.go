@@ -37,13 +37,14 @@ type AuthSnapshot struct {
 }
 
 type SessionInfo struct {
-	ID         string `json:"id"`
-	Name       string `json:"name"`
-	JID        string `json:"jid"`
-	State      string `json:"state"`
-	Paired     bool   `json:"paired"`
-	QR         string `json:"qr,omitempty"`
-	WebhookURL string `json:"webhookUrl,omitempty"`
+	ID           string `json:"id"`
+	Name         string `json:"name"`
+	JID          string `json:"jid"`
+	State        string `json:"state"`
+	Paired       bool   `json:"paired"`
+	QR           string `json:"qr,omitempty"`
+	WebhookURL   string `json:"webhookUrl,omitempty"`
+	PanelInbound bool   `json:"panelInbound"`
 }
 
 type subscriber struct {
@@ -58,8 +59,9 @@ type Broker struct {
 	calls   map[string]*CallRecord
 	history []CallRecord
 
-	SnapshotFn      func() []any
-	GetWebhookURLFn func(sessionID string) string
+	SnapshotFn        func() []any
+	GetWebhookURLFn   func(sessionID string) string
+	GetPanelInboundFn func() bool
 }
 
 func NewBroker() *Broker {
@@ -110,7 +112,7 @@ func (b *Broker) broadcast(ev any) {
 
 	for s := range b.subs {
 		payload := ev
-		
+
 		// If the subscriber is limited to a session, filter/discard events
 		if s.sessionID != "" {
 			if m, ok := ev.(map[string]any); ok {
@@ -118,7 +120,7 @@ func (b *Broker) broadcast(ev any) {
 				if m["type"] == "session-list" {
 					continue
 				}
-				
+
 				// 2. Filter call-list to only include calls for this session
 				if m["type"] == "call-list" {
 					if calls, ok := m["calls"].([]CallRecord); ok {
@@ -163,7 +165,11 @@ func (b *Broker) emitAuthState(sessionID string, a AuthSnapshot) {
 }
 
 func (b *Broker) emitSessionList(sessions []SessionInfo) {
-	b.broadcast(map[string]any{"type": "session-list", "sessions": sessions})
+	panelInbound := true
+	if b.GetPanelInboundFn != nil {
+		panelInbound = b.GetPanelInboundFn()
+	}
+	b.broadcast(map[string]any{"type": "session-list", "sessions": sessions, "panelInboundCalls": panelInbound})
 }
 
 func (b *Broker) emitSessionQR(sessionID, qr string) {
@@ -389,4 +395,3 @@ func (b *Broker) ActiveCallCount() int {
 	defer b.mu.RUnlock()
 	return len(b.calls)
 }
-

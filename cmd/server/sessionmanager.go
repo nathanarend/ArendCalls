@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/store/sqlstore"
@@ -18,17 +19,19 @@ type SessionManager struct {
 	container *sqlstore.Container
 	broker    *Broker
 	store     *sessionStore
+	rec       *recordingController
 	waLogger  waLog.Logger
 	log       *slog.Logger
 	maxCalls  int
 
-	mu       sync.RWMutex
-	sessions map[string]*Session
-	order    []string
+	mu               sync.RWMutex
+	sessions         map[string]*Session
+	order            []string
+	panelInboundCall atomic.Bool // global switch: panel shows incoming calls
 }
 
 func newSessionManager(ctx context.Context, container *sqlstore.Container, broker *Broker, store *sessionStore, waLogger waLog.Logger, log *slog.Logger, maxCalls int) *SessionManager {
-	return &SessionManager{
+	m := &SessionManager{
 		appCtx:    ctx,
 		container: container,
 		broker:    broker,
@@ -38,6 +41,8 @@ func newSessionManager(ctx context.Context, container *sqlstore.Container, broke
 		maxCalls:  maxCalls,
 		sessions:  map[string]*Session{},
 	}
+	m.panelInboundCall.Store(true)
+	return m
 }
 
 func (m *SessionManager) register(s *Session) {
@@ -101,7 +106,10 @@ func (m *SessionManager) infos() []SessionInfo {
 }
 
 func (m *SessionManager) snapshotEvents() []any {
-	return []any{map[string]any{"type": "session-list", "sessions": m.infos()}}
+	return []any{map[string]any{
+		"type": "session-list", "sessions": m.infos(),
+		"panelInboundCalls": m.PanelInboundCalls(),
+	}}
 }
 
 func (m *SessionManager) getWebhookURL(id string) string {
@@ -113,7 +121,25 @@ func (m *SessionManager) getWebhookURL(id string) string {
 	return ""
 }
 
+// PanelInboundCalls is the global "panel shows incoming calls" switch.
+func (m *SessionManager) PanelInboundCalls() bool { return m.panelInboundCall.Load() }
+
+// SetPanelInboundCalls flips the global switch and broadcasts the change.
+func (m *SessionManager) SetPanelInboundCalls(ctx context.Context, enabled bool) error {
+	if err := m.store.setPanelInboundCalls(ctx, enabled); err != nil {
+		return err
+	}
+	m.panelInboundCall.Store(enabled)
+	m.broker.emitSessionList(m.infos())
+	return nil
+}
+
 func (m *SessionManager) Restore(ctx context.Context) error {
+	if enabled, err := m.store.panelInboundCalls(ctx); err == nil {
+		m.panelInboundCall.Store(enabled)
+	} else {
+		m.panelInboundCall.Store(true)
+	}
 	rows, err := m.store.list(ctx)
 	if err != nil {
 		return err
@@ -122,7 +148,7 @@ func (m *SessionManager) Restore(ctx context.Context) error {
 		if row.JID == "" {
 			device := m.container.NewDevice()
 			client := whatsmeow.NewClient(device, m.waLogger)
-			s := newSession(m, row.ID, row.Name, row.WebhookURL, client)
+			s := newSession(m, row.ID, row.Name, row.WebhookURL, row.PanelInbound, client)
 			s.auth = AuthSnapshot{State: "logged_out", Paired: false}
 			m.register(s)
 			continue
@@ -132,7 +158,7 @@ func (m *SessionManager) Restore(ctx context.Context) error {
 			m.log.Warn("session has unparseable jid; preserving session in logged_out state", "session", row.ID, "jid", row.JID)
 			device := m.container.NewDevice()
 			client := whatsmeow.NewClient(device, m.waLogger)
-			s := newSession(m, row.ID, row.Name, row.WebhookURL, client)
+			s := newSession(m, row.ID, row.Name, row.WebhookURL, row.PanelInbound, client)
 			s.auth = AuthSnapshot{State: "logged_out", Paired: false}
 			m.register(s)
 			continue
@@ -142,13 +168,13 @@ func (m *SessionManager) Restore(ctx context.Context) error {
 			m.log.Warn("session device not found; preserving session in logged_out state", "session", row.ID, "jid", row.JID)
 			device = m.container.NewDevice()
 			client := whatsmeow.NewClient(device, m.waLogger)
-			s := newSession(m, row.ID, row.Name, row.WebhookURL, client)
+			s := newSession(m, row.ID, row.Name, row.WebhookURL, row.PanelInbound, client)
 			s.auth = AuthSnapshot{State: "logged_out", Paired: false}
 			m.register(s)
 			continue
 		}
 		client := whatsmeow.NewClient(device, m.waLogger)
-		s := newSession(m, row.ID, row.Name, row.WebhookURL, client)
+		s := newSession(m, row.ID, row.Name, row.WebhookURL, row.PanelInbound, client)
 		m.register(s)
 		if err := s.connect(ctx); err != nil {
 			m.log.Error("session connect failed", "session", row.ID, "err", err)
@@ -166,7 +192,7 @@ func (m *SessionManager) Create(name string) (string, error) {
 	}
 	device := m.container.NewDevice()
 	client := whatsmeow.NewClient(device, m.waLogger)
-	s := newSession(m, id, name, "", client)
+	s := newSession(m, id, name, "", true, client)
 	m.register(s)
 	m.broker.emitSessionList(m.infos())
 	if err := s.startPairing(m.appCtx); err != nil {
@@ -307,7 +333,6 @@ func (m *SessionManager) disconnectAll() {
 	}
 }
 
-
 func (m *SessionManager) SetWebhookURL(ctx context.Context, id, webhookURL string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -328,6 +353,24 @@ func (m *SessionManager) SetWebhookURL(ctx context.Context, id, webhookURL strin
 	return nil
 }
 
+func (m *SessionManager) SetPanelInbound(ctx context.Context, id string, enabled bool) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	s, ok := m.sessions[id]
+	if !ok {
+		return fmt.Errorf("no session %s", id)
+	}
+	if err := m.store.setPanelInbound(ctx, id, enabled); err != nil {
+		return fmt.Errorf("update panel_inbound in store: %w", err)
+	}
+	s.mu.Lock()
+	s.panelInbound = enabled
+	s.mu.Unlock()
+	m.broker.emitSessionList(m.infosLocked())
+	return nil
+}
+
 func (m *SessionManager) SessionCounts() (total int, connected int) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -342,4 +385,3 @@ func (m *SessionManager) SessionCounts() (total int, connected int) {
 	}
 	return total, connected
 }
-

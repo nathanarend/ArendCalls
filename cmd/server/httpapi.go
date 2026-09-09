@@ -19,6 +19,9 @@ func (s *server) routes() http.Handler {
 	mux.HandleFunc("POST /api/sessions", s.handleSessionCreate)
 	mux.HandleFunc("PATCH /api/sessions/{sid}", s.handleSessionRename)
 	mux.HandleFunc("PATCH /api/sessions/{sid}/webhook", s.handleSessionWebhook)
+	mux.HandleFunc("PATCH /api/sessions/{sid}/panel-inbound", s.handleSessionPanelInbound)
+	mux.HandleFunc("GET /api/panel-settings", s.handleGetPanelSettings)
+	mux.HandleFunc("PATCH /api/panel-settings", s.handleSetPanelSettings)
 	mux.HandleFunc("DELETE /api/sessions/{sid}", s.handleSessionDelete)
 	mux.HandleFunc("POST /api/sessions/{sid}/logout", s.handleSessionLogout)
 	mux.HandleFunc("POST /api/sessions/{sid}/pair", s.handleSessionPair)
@@ -34,6 +37,10 @@ func (s *server) routes() http.Handler {
 	mux.HandleFunc("DELETE /api/sessions/{sid}/calls/{id}", s.handleEndCall)
 	mux.HandleFunc("GET /api/sessions/{sid}/history", s.handleHistory)
 	mux.HandleFunc("POST /api/sessions/{sid}/check-number", s.handleCheckNumber)
+	mux.HandleFunc("GET /api/sessions/{sid}/recording-config", s.handleGetRecordingConfig)
+	mux.HandleFunc("PATCH /api/sessions/{sid}/recording-config", s.handleSetRecordingConfig)
+	mux.HandleFunc("GET /api/sessions/{sid}/recordings", s.handleListRecordings)
+	mux.HandleFunc("GET /api/sessions/{sid}/calls/{id}/recording-info", s.handleRecordingInfo)
 
 	mux.HandleFunc("GET /api/events", s.handleEvents)
 	mux.HandleFunc("GET /api/system/metrics", s.handleSystemMetrics)
@@ -196,6 +203,46 @@ func (s *server) handleSessionWebhook(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
+// handleSessionPanelInbound sets the per-account override: force-show this
+// account's incoming calls in the panel even when the global switch is off
+// (a test bypass). It never hides — the global switch does that.
+func (s *server) handleSessionPanelInbound(w http.ResponseWriter, r *http.Request) {
+	sid := r.PathValue("sid")
+	var body struct {
+		Enabled bool `json:"enabled"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
+		return
+	}
+	if err := s.sessions.SetPanelInbound(r.Context(), sid, body.Enabled); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "panelInbound": body.Enabled})
+}
+
+func (s *server) handleGetPanelSettings(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{"inboundCalls": s.sessions.PanelInboundCalls()})
+}
+
+// handleSetPanelSettings flips the global "panel shows incoming calls" switch.
+// A per-account override can still force-show individual accounts (logical OR).
+func (s *server) handleSetPanelSettings(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		InboundCalls bool `json:"inboundCalls"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
+		return
+	}
+	if err := s.sessions.SetPanelInboundCalls(r.Context(), body.InboundCalls); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "inboundCalls": body.InboundCalls})
+}
+
 func (s *server) handleSessionDelete(w http.ResponseWriter, r *http.Request) {
 	if err := s.sessions.Delete(r.Context(), r.PathValue("sid")); err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
@@ -203,7 +250,6 @@ func (s *server) handleSessionDelete(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
-
 
 func (s *server) handleSessionLogout(w http.ResponseWriter, r *http.Request) {
 	if err := s.sessions.Logout(r.Context(), r.PathValue("sid")); err != nil {
@@ -324,6 +370,7 @@ func (s *server) doStartCall(sess *Session, w http.ResponseWriter, r *http.Reque
 		Phone      string `json:"phone"`
 		DurationMs int    `json:"duration_ms"`
 		Record     bool   `json:"record"`
+		ClinicID   string `json:"clinicId"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || strings.TrimSpace(body.Phone) == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "phone required"})
@@ -371,6 +418,13 @@ func (s *server) doStartCall(sess *Session, w http.ResponseWriter, r *http.Reque
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	if body.Record && sess.mgr.rec != nil {
+		sess.mgr.rec.arm(recMeta{
+			callID: callID, sessionID: sess.id, clinicID: strings.TrimSpace(body.ClinicID),
+			direction: "outbound", peer: peer.String(),
+		})
+	}
+
 	existing, _ := s.broker.getCall(callID)
 	status := StatusStarting
 	startedAt := time.Now().UnixMilli()
@@ -413,6 +467,9 @@ func (s *server) doWebRTC(sess *Session, w http.ResponseWriter, r *http.Request)
 
 	bridge.OnBrowserPCM = func(pcm []float32) {
 		ac.cm.FeedCapturedPCM(pcm)
+		if r := ac.rec.Load(); r != nil {
+			r.WriteOperator(pcm)
+		}
 	}
 	bridge.OnTerminalICE = func() {
 		if cur, ok := sess.reg.get(callID); ok && cur.bridge == bridge {
@@ -452,6 +509,33 @@ func (s *server) doAccept(sess *Session, w http.ResponseWriter, r *http.Request)
 		return
 	}
 	s.broker.emitIncomingClaimed(sess.id, id, owner)
+
+	// Recording of this incoming call: an explicit `record` on the accept wins;
+	// otherwise the session's "record inbound" default (recording-config) decides.
+	var body struct {
+		Record   bool   `json:"record"`
+		ClinicID string `json:"clinicId"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&body)
+	if rec := sess.mgr.rec; rec != nil {
+		wantRec := body.Record
+		if !wantRec {
+			if cfg, cErr := s.recStore.config(r.Context(), sess.id, rec.secrets); cErr == nil {
+				wantRec = cfg.RecordInbound
+			}
+		}
+		if wantRec {
+			peer := ""
+			if cr, _ := s.broker.getCall(id); cr != nil {
+				peer = cr.Peer
+			}
+			rec.arm(recMeta{
+				callID: id, sessionID: sess.id, clinicID: strings.TrimSpace(body.ClinicID),
+				direction: "inbound", peer: peer,
+			})
+		}
+	}
+
 	if err := ac.cm.AcceptCall(r.Context(), id); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -595,5 +679,3 @@ func cleanOnlyDigits(s string) string {
 	}
 	return sb.String()
 }
-
-

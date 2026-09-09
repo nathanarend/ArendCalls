@@ -3,6 +3,7 @@ import { Phone, PhoneIncoming, PhoneOff } from "lucide-react";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { useCalls } from "@/stores/calls";
+import { useSessions } from "@/stores/sessions";
 import { useDevices } from "@/stores/devices";
 import { useAcceptCall } from "@/hooks/useAcceptCall";
 import { useRejectCall } from "@/hooks/useRejectCall";
@@ -50,28 +51,35 @@ const startRingLoop = (): RingHandle | null => {
 
 export const IncomingCallModal = () => {
   const incoming = useCalls((s) => s.incoming);
+  const sessions = useSessions((s) => s.sessions);
+  const panelInboundCalls = useSessions((s) => s.panelInboundCalls);
   const micId = useDevices((s) => s.micId);
   const accept = useAcceptCall(micId);
   const reject = useRejectCall();
   const busy = accept.isPending || reject.isPending;
 
+  const session = incoming ? sessions.find((s) => s.id === incoming.sessionId) : undefined;
+  // OU lógico: mostra se o switch global está ligado OU esta conta tem o
+  // override ligado (bypass de teste).
+  const show = !!incoming && (panelInboundCalls || session?.panelInbound === true);
+
   useEffect(() => {
-    if (!incoming) {
+    if (!show) {
       document.title = "ArendCalls";
       return;
     }
-    
+
     document.title = "Recebendo chamada...";
     const ring = startRingLoop();
-    
+
     return () => {
       ring?.stop();
       document.title = "ArendCalls";
     };
-  }, [incoming]);
+  }, [show]);
 
   return (
-    <Dialog open={!!incoming}>
+    <Dialog open={show}>
       <DialogContent
         showCloseButton={false}
         onEscapeKeyDown={(e) => e.preventDefault()}
@@ -83,6 +91,11 @@ export const IncomingCallModal = () => {
           <div className="mb-2 flex h-14 w-14 items-center justify-center rounded-full bg-primary/10 text-primary">
             <PhoneIncoming className="h-7 w-7" />
           </div>
+          {session && (
+            <span className="rounded-full bg-muted px-2.5 py-0.5 text-xs font-medium text-muted-foreground">
+              {session.name}
+            </span>
+          )}
           <DialogTitle className="text-xl">Chamada Recebida</DialogTitle>
           <DialogDescription className="truncate">{incoming?.peerName || incoming?.peer}</DialogDescription>
         </DialogHeader>
