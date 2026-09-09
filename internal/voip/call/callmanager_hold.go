@@ -116,29 +116,29 @@ func (m *CallManager) runHoldAudioLoop(stop chan struct{}, audioSamples []float3
 		case <-stop:
 			return
 		case <-ticker.C:
-		m.mu.Lock()
-		ready := m.isHold && m.codec != nil && m.rtpSession != nil && m.srtpSession != nil && m.relay.HasConnection()
-		if !ready {
-			m.mu.Unlock()
-			continue
-		}
-
-		frame := make([]float32, frameSize)
-		for i := 0; i < frameSize; i++ {
-			seqIdx := sampleIdx % loopLength
-			if seqIdx < totalSamples {
-				frame[i] = audioSamples[seqIdx]
-			} else {
-				frame[i] = 0.0
+			m.mu.Lock()
+			ready := m.isHold && m.codec != nil && m.rtpSession != nil && m.srtpSession != nil && m.relay.HasConnection()
+			if !ready {
+				m.mu.Unlock()
+				continue
 			}
-			sampleIdx++
-		}
 
-		opus, err := m.codec.Encode(frame)
-		if err == nil {
-			m.sendOpusFrameLocked(opus)
-		}
-		m.mu.Unlock()
+			frame := make([]float32, frameSize)
+			for i := 0; i < frameSize; i++ {
+				seqIdx := sampleIdx % loopLength
+				if seqIdx < totalSamples {
+					frame[i] = audioSamples[seqIdx]
+				} else {
+					frame[i] = 0.0
+				}
+				sampleIdx++
+			}
+
+			opus, err := m.codec.Encode(frame)
+			if err == nil {
+				m.sendOpusFrameLocked(opus)
+			}
+			m.mu.Unlock()
 		}
 	}
 }

@@ -295,14 +295,13 @@ func (m *CallManager) HandleCallRinging() {
 		m.mu.Unlock()
 		return
 	}
-	
+
 	if err := call.ApplyTransition(Transition{Type: TransitionRingingReceived}); err != nil {
 		m.mu.Unlock()
 		return
 	}
-	
+
 	m.log.Info("call ringing (ringer receipt received)", "call_id", call.CallID)
 	m.emitState()
 	m.mu.Unlock()
 }
-

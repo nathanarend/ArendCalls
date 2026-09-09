@@ -44,9 +44,9 @@ type CallManager struct {
 	isHold        bool
 	holdStop      chan struct{}
 
-	OnStateChange func(*CallInfo)
-	OnIncoming    func(*CallInfo)
-	OnEnded       func(*CallInfo)
+	OnStateChange    func(*CallInfo)
+	OnIncoming       func(*CallInfo)
+	OnEnded          func(*CallInfo)
 	OnPeerAudio      func([]float32)
 	OnRelayConnected func() // disparado quando o primeiro relay de mídia conecta
 }
