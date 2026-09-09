@@ -23,3 +23,5 @@
 - Fila durável de processamento assíncrono em SQLite com pool de workers e dispatch de webhooks assinados com HMAC-SHA256 e backoff exponencial.
 - Criptografia simétrica autenticada AES-256-GCM para proteção de credenciais em repouso no SQLite com derivação de chave de ambiente.
 - Profiling e otimização de baixo nível no codec MLow (reutilização de buffers em pool `sync.Pool`, eliminação de alocações na iFFT / transformadas e redução de consumo de CPU em 63%).
+- Correção de atribuição de ownership de sessões WebRTC no backend Go para casar perfeitamente com o identificador de cliente do frontend React e garantir montagem do pipeline de áudio.
+- Padronização de âncoras HTML explícitas em documentações Markdown para assegurar navegação estável e independente de parsers no GitHub.

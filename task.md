@@ -76,3 +76,6 @@
 - [x] Documentação: Criação do guia de handoff e deploy `docs/HANDOFF-v2026.20-push-release.md`.
 - [x] Docker: Build e publicação das imagens `nathanarend/arendcalls:v2026.20` e `nathanarend/arendcalls:latest` no DockerHub.
 - [x] GitHub: Publicação de commits e tag `v2026.20` no repositório remoto.
+- [x] Backend/Bugfix: Corrigir áudio de entrada mudo ao atender chamada recebida no painel (`doAccept` usando `clientId` real em vez de token aleatório para o dono da chamada).
+- [x] Documentação: Criação de `RELEASE_NOTES-v2026.21.md` e `docs/HANDOFF-v2026.21-patch.md`.
+- [x] Documentação: Correção de âncoras internas no `README.md` com tags `<a id="..."></a>` para navegação no GitHub.

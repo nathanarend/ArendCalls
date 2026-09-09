@@ -10,14 +10,15 @@
 [![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)](https://react.dev)
 [![whatsmeow](https://img.shields.io/badge/whatsmeow-VoIP-25D366?logo=whatsapp&logoColor=white)](https://github.com/tulir/whatsmeow)
 [![pion](https://img.shields.io/badge/pion-WebRTC-FF6B6B)](https://github.com/pion/webrtc)
-[![Licença](https://img.shields.io/badge/licen%C3%A7a-MIT-green.svg)](#-licença)
+[![Licença](https://img.shields.io/badge/licen%C3%A7a-MIT-green.svg)](#licenca)
 
-[Diferenciais](#-principais-recursos-e-diferenciais) · [Início Rápido (Docker)](#-início-rápido-com-docker-recomendado) · [Como Funciona](#-como-funciona-o-fluxo-de-chamada) · [Arquitetura](#-arquitetura) · [Rotas da API](#-endpoints-da-api) · [Gravação](#-gravação-de-chamada-no-servidor) · [Autenticação](#-segurança-e-autenticação)
+[Diferenciais](#diferenciais) · [Início Rápido (Docker)](#inicio-rapido) · [Como Funciona](#como-funciona) · [Arquitetura](#arquitetura) · [Rotas da API](#endpoints) · [Gravação](#gravacao) · [Autenticação](#seguranca)
 
 </div>
 
 ---
 
+<a id="sobre"></a>
 ## 💡 Sobre o Projeto
 
 O **ArendCalls** permite conectar uma ou mais contas de WhatsApp via **QR code** e realizar e receber **chamadas de voz 1:1** diretamente de qualquer navegador na rede.
@@ -35,6 +36,7 @@ Todo o ecossistema VoIP roda **nativamente em puro Go**:
 
 ---
 
+<a id="diferenciais"></a>
 ## 🚀 Principais Recursos e Diferenciais
 
 Este repositório (`ArendCalls`) traz diversas melhorias de engenharia e usabilidade em relação ao projeto original:
@@ -56,6 +58,7 @@ Este repositório (`ArendCalls`) traz diversas melhorias de engenharia e usabili
 
 ---
 
+<a id="inicio-rapido"></a>
 ## 🐳 Início Rápido com Docker (Recomendado)
 
 A maneira mais prática e recomendada para rodar em servidores e VPS:
@@ -111,6 +114,7 @@ Acesse o endereço configurado (ou `http://localhost:8080`), clique em **Nova Co
 
 ---
 
+<a id="instalacao-local"></a>
 ## 💻 Instalação e Execução Local
 
 ### Pré-requisitos
@@ -156,6 +160,7 @@ imagem Docker), `GOMEMLIMIT` (recomendado em produção, ~75% da RAM do containe
 
 ---
 
+<a id="como-funciona"></a>
 ## 🔄 Como Funciona o Fluxo de Chamada
 
 ```
@@ -169,6 +174,7 @@ imagem Docker), `GOMEMLIMIT` (recomendado em produção, ~75% da RAM do containe
 
 ---
 
+<a id="arquitetura"></a>
 ## 🏗️ Arquitetura
 
 ```
@@ -201,9 +207,10 @@ imagem Docker), `GOMEMLIMIT` (recomendado em produção, ~75% da RAM do containe
 
 ---
 
+<a id="endpoints"></a>
 ## 📡 Endpoints da API
 
-Todas as rotas de API exigem autenticação (ver [Segurança](#-segurança-e-autenticação)).
+Todas as rotas de API exigem autenticação (ver [Segurança](#seguranca)).
 
 ### Instâncias / Sessões
 
@@ -251,6 +258,7 @@ Todas as rotas de API exigem autenticação (ver [Segurança](#-segurança-e-aut
 
 ---
 
+<a id="gravacao"></a>
 ## 🎙️ Gravação de Chamada no Servidor
 
 O ArendCalls — que já é o relay das duas pontas de voz — grava a chamada, gera um
@@ -316,6 +324,7 @@ Retry com backoff (1 min / 5 min / 15 min / 1 h) persistido e retomado no boot;
 
 ---
 
+<a id="painel-inbound"></a>
 ## 📴 Chamadas Recebidas no Painel
 
 - **Interruptor global** (`GET`/`PATCH /api/panel-settings`, default **ligado**):
@@ -331,6 +340,7 @@ administrativo enquanto um app/endpoint externo atende as chamadas.
 
 ---
 
+<a id="seguranca"></a>
 ## 🔒 Segurança e Autenticação
 
 ### 1. Acesso Direto (Local ou com API Key)
@@ -353,6 +363,7 @@ curl -s -u usuario:senha "https://call.seudominio.com/api/sessions?apikey=sua_ch
 
 ---
 
+<a id="creditos"></a>
 ## 👥 Créditos e Agradecimentos
 
 O **ArendCalls** é desenvolvido como um fork aprimorado do projeto de código aberto [WaCalls](https://github.com/jobasfernandes/wacalls), criado por:
@@ -375,6 +386,8 @@ Projetos de base essenciais:
 
 ---
 
+<a id="licenca"></a>
 ## 📄 Licença
 
 Distribuído sob a licença [MIT](./LICENSE).
+

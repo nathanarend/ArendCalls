@@ -77,5 +77,13 @@ Para garantir que o status avance corretamente de "Ligando..." para "Chamando...
   - Indicação visual do nome da conta que está tocando no modal de chamada recebida.
 - **Otimização de Performance do Codec MLow**:
   - Redução de ~63% no tempo de CPU do encoder e −66% em alocações na hot path de áudio, mantendo saída byte a byte idêntica aos testes de conformidade (KATs).
-- **Ajustes de Infraestrutura e Compilação**:
-  - Correção de exclusão acidental no `.gitignore`, compilação Go sem CGO (reduzindo imagem Docker de 39MB para 28MB) e suporte a profiling sob demanda (`-pprof`).
+## Ajustes de Infraestrutura e Compilação
+- Correção de exclusão acidental no `.gitignore`, compilação Go sem CGO (reduzindo imagem Docker de 39MB para 28MB) e suporte a profiling sob demanda (`-pprof`).
+
+## Release de Correção Crítica (v2026.21)
+- **Correção de Áudio de Entrada Mudo ao Atender no Painel**:
+  - `cmd/server/httpapi.go` (`doAccept`): O `owner` da chamada agora recebe o `clientId` real do navegador que enviou a requisição de aceite. Caso nenhum `clientId` seja fornecido (chamada via API pura sem navegador), gera-se o fallback `claim-xxxx`.
+  - Isso garante que o painel React reconheça a chamada como sua (`owner === myClientId`), montando o elemento `<audio>` e renderizando o card com os controles de chamada ativos.
+  - A proteção de concorrência com chave de claim e resposta `409 Conflict` segue totalmente mantida.
+- **Correção de Navegação e Âncoras no README.md**:
+  - Inserção de tags `<a id="..."></a>` para compatibilidade 100% confiável com a renderização de Markdown no GitHub.
