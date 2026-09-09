@@ -1,6 +1,9 @@
 package mlow
 
-import "math"
+import (
+	"math"
+	"sync"
+)
 
 const (
 	SmplLPCOrder  = 16
@@ -128,21 +131,31 @@ type dctTables struct {
 	csumsum  [SmplLPCOrder / 4][nfft4]float64
 }
 
-func buildDctTables() dctTables {
-	// Source of truth: https://github.com/oxidezap/whatsapp-rust/blob/674e85164b35ca19115dfebcf605708d15951ee7/wacore/src/voip/mlow/smpl_lpc.rs#L115-L143
-	twoPi := 2.0 * smplPIF64
-	nfft := float64(SmplLPCNFFT)
-	var t dctTables
-	for j := 0; j < SmplLPCOrder/2; j++ {
-		t.cdif[j] = genCosRow(float64(1+j*2)*twoPi/nfft, 2.0/nfft)
-	}
-	for j := 0; j < SmplLPCOrder/4; j++ {
-		t.csumdiff[j] = genCosRow(float64(2+j*4)*twoPi/nfft, 1.0/nfft)
-	}
-	for j := 0; j < SmplLPCOrder/4; j++ {
-		t.csumsum[j] = genCosRow(float64(4+j*4)*twoPi/nfft, 1.0/nfft)
-	}
-	return t
+// The DCT cosine tables depend only on compile-time constants, but
+// smplLPCAnalyzeWithF2 rebuilt them (~2k math.Cos calls) on every frame —
+// ~4% of encoder CPU. Build once; bruteDct only ever reads them.
+var (
+	dctTablesOnce sync.Once
+	dctTablesInst dctTables
+)
+
+func getDctTables() *dctTables {
+	dctTablesOnce.Do(func() {
+		// Source of truth: https://github.com/oxidezap/whatsapp-rust/blob/674e85164b35ca19115dfebcf605708d15951ee7/wacore/src/voip/mlow/smpl_lpc.rs#L115-L143
+		twoPi := 2.0 * smplPIF64
+		nfft := float64(SmplLPCNFFT)
+		t := &dctTablesInst
+		for j := 0; j < SmplLPCOrder/2; j++ {
+			t.cdif[j] = genCosRow(float64(1+j*2)*twoPi/nfft, 2.0/nfft)
+		}
+		for j := 0; j < SmplLPCOrder/4; j++ {
+			t.csumdiff[j] = genCosRow(float64(2+j*4)*twoPi/nfft, 1.0/nfft)
+		}
+		for j := 0; j < SmplLPCOrder/4; j++ {
+			t.csumsum[j] = genCosRow(float64(4+j*4)*twoPi/nfft, 1.0/nfft)
+		}
+	})
+	return &dctTablesInst
 }
 
 // bruteDct derives the autocorrelation R[0..order] from the power spectrum via the
@@ -271,9 +284,8 @@ func smplLPCAnalyzeWithF2(windowed *[SmplLPCBufLen]float32) ([SmplLPCOrder + 1]f
 		f2d[i] = float64(f2[i])
 	}
 
-	tables := buildDctTables()
 	var r [SmplLPCOrder + 1]float64
-	bruteDct(&tables, f2d, SmplLPCOrder, r[:])
+	bruteDct(getDctTables(), f2d, SmplLPCOrder, r[:])
 
 	var rc [SmplLPCOrder]float32
 	ac2rcDbl(r[:], SmplLPCOrder, smplLPCReg, rc[:])

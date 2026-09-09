@@ -3,6 +3,7 @@ package mlow
 import (
 	"math"
 	"sync"
+	"sync/atomic"
 )
 
 // cpx is a single-precision complex value.
@@ -25,7 +26,7 @@ func (a cpx) mul(b cpx) cpx {
 
 // twiddleCache memoizes, per transform length n, the n-th roots of unity
 //
-//	w[m] = exp(-i·2π·m/n)   (forward, sign = -1)
+//	w[m] = exp(±i·2π·m/n)   (index 0 = forward exp(-i…), index 1 = inverse)
 //
 // fftRec used to recompute these with math.Cos/math.Sin inside its inner loops on
 // every call — profiling put math.Cos alone at ~45% of the whole encoder. Only n
@@ -35,29 +36,53 @@ func (a cpx) mul(b cpx) cpx {
 // read-only lookups. Computing the table at 2π·m/n in float64 also keeps the
 // angle in [0, 2π) instead of letting math.Cos see a large, precision-losing
 // float32 argument for high bins — closer to the reference FFT, not further.
-var twiddleCache sync.Map // twiddleKey -> []cpx
+//
+// Stored as a copy-on-write map behind an atomic pointer: the steady-state read
+// is an atomic load + int-keyed map lookup, no lock and no interface hashing (a
+// sync.Map keyed by a struct showed up at ~10% of encoder CPU in typehash +
+// HashTrieMap.Load). Writes happen only until every n has been seen once.
+var (
+	twiddleCache atomic.Pointer[map[int]*[2][]cpx]
+	twiddleMu    sync.Mutex
+)
 
-type twiddleKey struct {
-	n       int
-	forward bool
-}
-
-func twiddles(n int, forward bool) []cpx {
-	key := twiddleKey{n, forward}
-	if v, ok := twiddleCache.Load(key); ok {
-		return v.([]cpx)
-	}
-	sign := 1.0
-	if forward {
-		sign = -1.0 // forward: w[m] = exp(-i·2π·m/n)
-	}
+func buildTwiddles(n int, sign float64) []cpx {
 	t := make([]cpx, n)
 	for m := 0; m < n; m++ {
 		s, c := math.Sincos(sign * 2.0 * math.Pi * float64(m) / float64(n))
 		t[m] = cpx{re: float32(c), im: float32(s)}
 	}
-	v, _ := twiddleCache.LoadOrStore(key, t)
-	return v.([]cpx)
+	return t
+}
+
+func twiddles(n int, forward bool) []cpx {
+	idx := 0
+	if !forward {
+		idx = 1
+	}
+	if m := twiddleCache.Load(); m != nil {
+		if e := (*m)[n]; e != nil {
+			return e[idx]
+		}
+	}
+	twiddleMu.Lock()
+	defer twiddleMu.Unlock()
+	old := twiddleCache.Load()
+	if old != nil {
+		if e := (*old)[n]; e != nil {
+			return e[idx]
+		}
+	}
+	next := make(map[int]*[2][]cpx)
+	if old != nil {
+		for k, v := range *old {
+			next[k] = v
+		}
+	}
+	entry := &[2][]cpx{buildTwiddles(n, -1.0), buildTwiddles(n, 1.0)}
+	next[n] = entry
+	twiddleCache.Store(&next)
+	return entry[idx]
 }
 
 // smallestFactor returns the smallest prime factor of n (>= 2).
