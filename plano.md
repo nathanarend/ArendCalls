@@ -64,3 +64,18 @@ Para garantir que o status avance corretamente de "Ligando..." para "Chamando...
   - Constatado que não existe corte ou timeout forçado de 60 segundos para chamadas ativas.
   - Verificação na base de dados de chamadas reais confirmando durações de até 310 segundos (5+ min).
   - Documentação consolidada em `docs/INVESTIGACAO-DURACAO-CHAMADAS.md`.
+
+## Funcionalidades e Otimizações da Release v2026.20 (Concluído)
+- **Gravação de Chamada no Servidor (Server-Side Recording)**:
+  - Captura direta nos relays (ambas as pernas de áudio) gerando streaming WAV estéreo (Canal Esquerdo: Agente / Canal Direito: Remoto).
+  - Limite de segurança de 40 minutos por gravação, upload assíncrono para Backblaze B2 (SigV4 nativo) via pool de workers e fila SQLite durável (`call_recordings`).
+  - Notificação de gravação pronta via Webhook assinado com HMAC-SHA256 e retentativas com backoff exponencial.
+  - Criptografia dos segredos (B2 e Webhook) com chave AES-256-GCM via env `RECORDING_CONFIG_KEY`.
+  - Configuração por sessão no painel e ativação flexível por chamada via flag `record: true`.
+- **Controles de Chamadas Recebidas no Painel**:
+  - Interruptor global em `panel_settings` e toggle individual de override por conta/instância.
+  - Indicação visual do nome da conta que está tocando no modal de chamada recebida.
+- **Otimização de Performance do Codec MLow**:
+  - Redução de ~63% no tempo de CPU do encoder e −66% em alocações na hot path de áudio, mantendo saída byte a byte idêntica aos testes de conformidade (KATs).
+- **Ajustes de Infraestrutura e Compilação**:
+  - Correção de exclusão acidental no `.gitignore`, compilação Go sem CGO (reduzindo imagem Docker de 39MB para 28MB) e suporte a profiling sob demanda (`-pprof`).

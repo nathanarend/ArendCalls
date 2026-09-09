@@ -18,3 +18,8 @@
 - Robustez e resiliência na máquina de estados de chamadas do WhatsApp: idempotência em `TransitionRemoteAccepted` e resolução de JID com fallback para pacotes `CallAccept` sem `call-id` explícito.
 - Auditoria sistemática de ciclo de vida e timers de chamadas VoIP (análise de `time.Timer`, SCTP keepalives, RTP silence generator e rotas HTTP).
 - Validação empírica de métricas de chamadas ativas na base de dados de produção.
+- Engenharia de pipeline de áudio server-side com captura estéreo via relays RTP, escrita contínua de cabeçalho WAV com flush e timeout seguro de 40 minutos.
+- Implementação de autenticação AWS SigV4 pura em Go para upload de stream diretamente ao Backblaze B2 S3 API sem SDK pesado.
+- Fila durável de processamento assíncrono em SQLite com pool de workers e dispatch de webhooks assinados com HMAC-SHA256 e backoff exponencial.
+- Criptografia simétrica autenticada AES-256-GCM para proteção de credenciais em repouso no SQLite com derivação de chave de ambiente.
+- Profiling e otimização de baixo nível no codec MLow (reutilização de buffers em pool `sync.Pool`, eliminação de alocações na iFFT / transformadas e redução de consumo de CPU em 63%).

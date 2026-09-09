@@ -65,4 +65,12 @@
   - [x] Verificação empírica de chamadas ativas com durações superiores a 60s (73s, 138s, 215s, 310s).
   - [x] Diagnóstico formal documentado em `docs/INVESTIGACAO-DURACAO-CHAMADAS.md`.
 - [x] Documentação de Release: Criado arquivo `RELEASE_NOTES-v2026.19.md` para publicação no GitHub Releases da tag `v2026.19`.
-
+- [x] Backend: Gravação de chamada no servidor (WAV estéreo L=agente/R=peer via relay, cap de 40min, upload direto ao Backblaze B2 via SigV4).
+- [x] Backend: Fila durável `call_recordings` + pool de workers assíncronos e webhook HMAC de notificação com retentativas e backoff.
+- [x] Backend: Criptografia AES-256-GCM para segredos de B2/webhook (`RECORDING_CONFIG_KEY`).
+- [x] Backend & Frontend: Configuração de gravação por sessão (`PATCH /api/sessions/{sid}/recording-config`) e ativação por chamada (`record: true`).
+- [x] Frontend: Controles de chamadas recebidas no painel (interruptor global em `panel_settings`, override por conta e identificação da instância no modal).
+- [x] Backend/Codec: Otimização do encoder MLow (−63% de tempo de CPU, −66% alocações, buffers de scratch reaproveitados).
+- [x] Build & Docker: Correção de arquivos ignorados indevidamente no `.gitignore` (`metrics.go`, `httpapi_test.go`), imagem Docker sem CGO (28MB), `GOGC=200`, flag `-pprof`.
+- [x] Documentação: Criação de `RELEASE_NOTES-v2026.20.md` e atualização completa do `README.md` com arquitetura, tabelas de endpoints e flags.
+- [x] Documentação: Criação do guia de handoff e deploy `docs/HANDOFF-v2026.20-push-release.md`.
