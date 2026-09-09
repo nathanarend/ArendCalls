@@ -285,9 +285,13 @@ func celpGetMaxi(x []float32, xLen int) int {
 	return i
 }
 
-func celpGetMaxiK(x []float32, idx []int32, xLen, k int) {
+func (e *CelpEncoder) celpGetMaxiK(x []float32, idx []int32, xLen, k int) {
 	// Source of truth: https://github.com/oxidezap/whatsapp-rust/blob/ed12f359a086b28e807ba236f0977af1000859fe/wacore/src/voip/mlow/smpl_celp.rs#L445-L462
-	taken := make([]bool, xLen)
+	if cap(e.maxiKTaken) < xLen {
+		e.maxiKTaken = make([]bool, xLen)
+	}
+	taken := e.maxiKTaken[:xLen]
+	clear(taken)
 	for kk := 0; kk < k; kk++ {
 		var best float32 = -math.MaxFloat32
 		bi := 0
@@ -555,6 +559,17 @@ type CelpEncoder struct {
 	impLpcBuf []float32
 	phi       []float32
 	phiFlip   []float32
+
+	// Reused scratch for smplFcbSearchDeldec — allocated once, reset per call
+	// (12 subframes/frame each used to allocate a fresh fcbSearchScratch, ~half
+	// the encoder's per-frame allocation). reset() restores the exact state
+	// newFcbSearchScratch() + fresh newFcbState() slices would have.
+	fcbSearch  *fcbSearchScratch
+	fcbBest    [smplCelpMaxRates]fcbState
+	fcbDNew    []float32
+	fcbDAbs    []float32
+	fcbDSign   []float32
+	maxiKTaken []bool
 }
 
 // NewCelpEncoder builds the encoder (mirrors CelpEncoder::new).
@@ -739,6 +754,22 @@ func newFcbSearchScratch() *fcbSearchScratch {
 	}
 }
 
+// reset restores sc to exactly the state a fresh newFcbSearchScratch() (with
+// newFcbState()-zeroed slices) would have, so it can be reused across calls.
+func (sc *fcbSearchScratch) reset() {
+	sc.readIdx, sc.writeIdx = 0, 1
+	sc.fcbsSize, sc.fcbCandidatesSize, sc.uniqueSgntrSize = 0, 0, 0
+	for b := range sc.fcbStates {
+		for i := range sc.fcbStates[b] {
+			st := &sc.fcbStates[b][i]
+			clear(st.pulsePositions)
+			clear(st.pulseSigns)
+			clear(st.num)
+			clear(st.den)
+		}
+	}
+}
+
 func (sc *fcbSearchScratch) swapRw() { sc.readIdx, sc.writeIdx = sc.writeIdx, sc.readIdx }
 
 func (sc *fcbSearchScratch) isUnique(sgntr uint64) bool {
@@ -859,7 +890,7 @@ func (e *CelpEncoder) addPulse(sc *fcbSearchScratch, fcbIdxIn int, dAbs, dSign [
 	q := make([]float32, smplMaxSfLen)
 	celpQ(sc.fcbStates[wi][idx].num, sc.fcbStates[wi][idx].den, fcbSubfrlen, q)
 	var sortIx [celpMaxNumsurv]int32
-	celpGetMaxiK(q, sortIx[:], fcbSubfrlen, numsurv)
+	e.celpGetMaxiK(q, sortIx[:], fcbSubfrlen, numsurv)
 	for i := 0; i < numsurv; i++ {
 		pos := int(sortIx[i])
 		sgntr := fcbSgntrBase + e.sgntrs[pos]
@@ -876,11 +907,19 @@ func (e *CelpEncoder) smplFcbSearchDeldec(d []float32, pitchSharp float32, lag i
 	pulses *[smplCelpMaxRates][smplMaxPulsesPerSf]int16, nPulses *[smplCelpMaxRates]int16, wnrg, gainFromSearch, fcbWnrg *[smplCelpMaxRates]float32) {
 	// Source of truth: https://github.com/oxidezap/whatsapp-rust/blob/ed12f359a086b28e807ba236f0977af1000859fe/wacore/src/voip/mlow/smpl_celp.rs#L1247-L1494
 	fcbSubfrlen := e.fcbSubfrlen
-	sc := newFcbSearchScratch()
+	if e.fcbSearch == nil {
+		e.fcbSearch = newFcbSearchScratch()
+		e.fcbBest = [smplCelpMaxRates]fcbState{newFcbState(), newFcbState()}
+		e.fcbDNew = make([]float32, smplMaxSfLen)
+		e.fcbDAbs = make([]float32, smplMaxSfLen)
+		e.fcbDSign = make([]float32, smplMaxSfLen)
+	}
+	sc := e.fcbSearch
+	sc.reset()
 
-	dNew := make([]float32, smplMaxSfLen)
-	dAbs := make([]float32, smplMaxSfLen)
-	dSign := make([]float32, smplMaxSfLen)
+	dNew := e.fcbDNew
+	dAbs := e.fcbDAbs
+	dSign := e.fcbDSign
 	phi0 := e.phi[0]
 
 	if pitchSharp != 0.0 && lag > 0 && lag < int32(fcbSubfrlen) {
@@ -901,7 +940,14 @@ func (e *CelpEncoder) smplFcbSearchDeldec(d []float32, pitchSharp float32, lag i
 	sc.readIdx = 0
 	sc.writeIdx = 1
 	var bestFcb [smplCelpMaxRates]fcb
-	bestFcbState := [smplCelpMaxRates]fcbState{newFcbState(), newFcbState()}
+	for r := range e.fcbBest {
+		st := &e.fcbBest[r]
+		clear(st.pulsePositions)
+		clear(st.pulseSigns)
+		clear(st.num)
+		clear(st.den)
+	}
+	bestFcbState := &e.fcbBest
 	var nrgThr [smplCelpMaxRates]float32
 
 	{
@@ -949,7 +995,7 @@ func (e *CelpEncoder) smplFcbSearchDeldec(d []float32, pitchSharp float32, lag i
 	}
 
 	var sortIx [celpMaxNumsurv]int32
-	celpGetMaxiK(q, sortIx[:], fcbSubfrlen, int(surv[0]))
+	e.celpGetMaxiK(q, sortIx[:], fcbSubfrlen, int(surv[0]))
 	sc.fcbsSize = 0
 	{
 		ri := sc.readIdx
@@ -983,7 +1029,7 @@ func (e *CelpEncoder) smplFcbSearchDeldec(d []float32, pitchSharp float32, lag i
 			for i := 0; i < candSize; i++ {
 				q[i] = sc.fcbCandidates[i].wnrg
 			}
-			celpGetMaxiK(q, sortIx[:], candSize, int(surv[pulseNr-1]))
+			e.celpGetMaxiK(q, sortIx[:], candSize, int(surv[pulseNr-1]))
 			sc.fcbsSize = 0
 			for i := 0; i < int(surv[pulseNr-1]); i++ {
 				sc.fcbs[sc.fcbsSize] = sc.fcbCandidates[sortIx[i]]
