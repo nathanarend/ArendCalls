@@ -44,6 +44,19 @@ type CallManager struct {
 	isHold        bool
 	holdStop      chan struct{}
 
+	// Inbound audio hardening (see onRelayData):
+	//  - rxLockedSsrc: the peer stream we forward. Locked to the first SSRC that
+	//    decodes; a different SSRC is dropped before decode, unless the locked
+	//    one has gone fully silent for rxLockedSilence (failover, not a per-frame
+	//    "which is louder" switch — that flapped).
+	//  - rxDedup*: sliding window of (ssrc<<16|seq) to drop exact relay copies.
+	rxLockedSsrc   uint32
+	rxLockedLastNs int64
+	rxDedup        map[uint64]struct{}
+	rxDedupRing    [512]uint64
+	rxDedupIdx     int
+	rxDedupFilled  bool
+
 	OnStateChange    func(*CallInfo)
 	OnIncoming       func(*CallInfo)
 	OnEnded          func(*CallInfo)

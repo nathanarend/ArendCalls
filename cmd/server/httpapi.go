@@ -514,6 +514,8 @@ func (s *server) doAccept(sess *Session, w http.ResponseWriter, r *http.Request)
 		return
 	}
 	s.broker.emitIncomingClaimed(sess.id, id, owner)
+	// broker.setOwner already broadcast the claim (call-list + call-status) so
+	// the answering panel sees isMine flip true and mounts the call card/audio.
 
 	// Recording of this incoming call: an explicit `record` on the accept wins;
 	// otherwise the session's "record inbound" default (recording-config) decides.

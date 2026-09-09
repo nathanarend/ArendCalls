@@ -102,6 +102,11 @@ func (m *CallManager) cleanupMedia() {
 	m.actualPeerSet = false
 	m.encodeBuf = nil
 	m.encodeBufPos = 0
+	m.rxLockedSsrc = 0
+	m.rxLockedLastNs = 0
+	m.rxDedup = nil
+	m.rxDedupIdx = 0
+	m.rxDedupFilled = false
 	m.mu.Unlock()
 
 	m.relay.Cleanup()

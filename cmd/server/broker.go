@@ -213,15 +213,30 @@ func (b *Broker) isCallConnected(id string) bool {
 
 func (b *Broker) setOwner(id, owner string) bool {
 	b.mu.Lock()
-	defer b.mu.Unlock()
 	c, ok := b.calls[id]
 	if !ok {
+		b.mu.Unlock()
 		return false
 	}
 	if c.Owner != nil && *c.Owner != owner {
+		b.mu.Unlock()
 		return false
 	}
 	c.Owner = &owner
+	rec := *c // snapshot for the broadcast below
+	b.mu.Unlock()
+
+	// Broadcast the claim so the panel that answered sees isMine flip true — and
+	// mounts the in-call card + audio — immediately, instead of waiting on the
+	// next OnStateChange from the WhatsApp negotiation (which lags and sometimes
+	// never lands). Done here, in place, rather than as a read-modify-write
+	// (getCall + upsertCall) at the call site, which could clobber a concurrent
+	// status update.
+	b.broadcastCallList()
+	b.broadcast(map[string]any{
+		"type": "call-status", "sessionId": rec.SessionID, "id": rec.CallID, "owner": rec.Owner,
+		"status": rec.Status, "peer": rec.Peer, "startedAt": rec.StartedAt,
+	})
 	return true
 }
 

@@ -1,8 +1,13 @@
 .git
 .github
+.agents
+docs
+*.md
 client/node_modules
 *.db
 *.db-shm
 *.db-wal
 bridge
 server
+arendcalls_bin
+

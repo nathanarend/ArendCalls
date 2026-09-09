@@ -28,7 +28,17 @@ export const ensureCallsWired = (): void => {
       useCalls.setState((s) => ({
         calls: s.calls.map((c) =>
           c.callId === ev.id
-            ? { ...c, sessionId: ev.sessionId, status: ev.status, peer: ev.peer, peerName: ev.peerName, startedAt: ev.startedAt }
+            ? {
+                ...c,
+                sessionId: ev.sessionId,
+                status: ev.status,
+                peer: ev.peer,
+                peerName: ev.peerName ?? c.peerName,
+                startedAt: ev.startedAt,
+                // owner can arrive on a later call-status (e.g. right after an
+                // accept claims the call) — never let it regress to null.
+                owner: ev.owner ?? c.owner,
+              }
             : c,
         ),
       }));

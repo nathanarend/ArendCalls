@@ -7,6 +7,10 @@ import (
 	"wacalls/internal/voip/transport"
 )
 
+// rxFailoverSilence: how long the locked peer SSRC may be fully silent before a
+// different arriving SSRC is allowed to take over — but only if it decodes.
+const rxFailoverSilence = 2 * time.Second
+
 func (m *CallManager) initCodec() {
 	if m.codec != nil {
 		return
@@ -131,6 +135,52 @@ func (m *CallManager) onRelayData(data []byte) {
 		m.mu.Unlock()
 		return
 	}
+
+	nowNs := time.Now().UnixNano()
+
+	// (C1) Forward exactly one peer stream. rxLockedSsrc is committed (in C2,
+	// after the decode) to the first SSRC that decodes. A different SSRC is
+	// dropped here — before spending a decode — UNLESS the locked stream has
+	// been fully silent past rxFailoverSilence; then this packet is let through
+	// as a failover candidate and only takes over the lock if it actually
+	// decodes. A stream of undecodable packets (e.g. a peer device whose
+	// per-JID SRTP key we don't hold) must never capture the lock, or the call
+	// would go permanently silent with no recovery.
+	failoverTry := false
+	if m.rxLockedSsrc != 0 && ssrc != m.rxLockedSsrc {
+		if nowNs-m.rxLockedLastNs > int64(rxFailoverSilence) {
+			failoverTry = true
+		} else {
+			m.mu.Unlock()
+			return
+		}
+	}
+	if ssrc == m.rxLockedSsrc {
+		m.rxLockedLastNs = nowNs
+	}
+
+	// (B) Drop exact relay copies. Several relays forward the same stream, so the
+	// same (ssrc, seq) arrives 2-3x. Sliding window keyed by ssrc<<16|seq.
+	seq := uint16(data[2])<<8 | uint16(data[3])
+	dkey := uint64(ssrc)<<16 | uint64(seq)
+	if m.rxDedup == nil {
+		m.rxDedup = make(map[uint64]struct{}, len(m.rxDedupRing))
+	}
+	if _, dup := m.rxDedup[dkey]; dup {
+		m.mu.Unlock()
+		return
+	}
+	if m.rxDedupFilled {
+		delete(m.rxDedup, m.rxDedupRing[m.rxDedupIdx])
+	}
+	m.rxDedupRing[m.rxDedupIdx] = dkey
+	m.rxDedup[dkey] = struct{}{}
+	m.rxDedupIdx++
+	if m.rxDedupIdx == len(m.rxDedupRing) {
+		m.rxDedupIdx = 0
+		m.rxDedupFilled = true
+	}
+
 	if !m.actualPeerSet {
 		m.actualPeerSet = true
 		if !containsSsrc(m.peerSsrcs, ssrc) {
@@ -153,8 +203,28 @@ func (m *CallManager) onRelayData(data []byte) {
 	}
 	pcm, err := codec.Decode(pkt.Payload)
 	if err != nil {
-		return
+		return // decode failed → lock unchanged, failover not taken
 	}
+
+	// (C2) Commit the lock only now that the packet decoded: the first SSRC that
+	// ever decodes, or a failover SSRC that just proved it decodes while the
+	// previous lock stayed silent. Echo never reaches here (it fails
+	// srtp.Unprotect — separate send/recv keys).
+	if m.rxLockedSsrc == 0 || failoverTry {
+		m.mu.Lock()
+		if m.rxLockedSsrc == 0 {
+			m.rxLockedSsrc = ssrc
+			m.rxLockedLastNs = nowNs
+			m.log.Debug("rx peer ssrc locked", "ssrc", ssrc)
+		} else if failoverTry && ssrc != m.rxLockedSsrc &&
+			nowNs-m.rxLockedLastNs > int64(rxFailoverSilence) {
+			m.log.Debug("rx peer ssrc re-lock (previous went silent)", "from", m.rxLockedSsrc, "to", ssrc)
+			m.rxLockedSsrc = ssrc
+			m.rxLockedLastNs = nowNs
+		}
+		m.mu.Unlock()
+	}
+
 	pcm = media.NormalizeFrame(pcm, codec.FrameSize())
 	if m.OnPeerAudio != nil {
 		m.OnPeerAudio(pcm)
