@@ -497,12 +497,17 @@ func (s *server) doAccept(sess *Session, w http.ResponseWriter, r *http.Request)
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no such call"})
 		return
 	}
-	// O servidor gera sempre um identificador único de claim interno.
-	// A primeira requisição a chegar assume e tranca a chamada;
-	// qualquer requisição simultânea ou concorrente seguinte receberá 409 Conflict.
-	b := make([]byte, 8)
-	_, _ = rand.Read(b)
-	owner := "claim-" + hex.EncodeToString(b)
+	// O dono da chamada é o cliente que atendeu (X-Client-Id) — é isso que faz
+	// o painel reconhecer a chamada como sua (isMine) e montar o áudio. Sem
+	// X-Client-Id (atendimento via API pura), gera um claim sintético.
+	// De qualquer forma, a primeira requisição a chamar setOwner tranca a
+	// chamada; qualquer atendimento concorrente de outro cliente recebe 409.
+	owner := clientID(r)
+	if owner == "" {
+		b := make([]byte, 8)
+		_, _ = rand.Read(b)
+		owner = "claim-" + hex.EncodeToString(b)
+	}
 
 	if !s.broker.setOwner(id, owner) {
 		writeJSON(w, http.StatusConflict, map[string]string{"error": "claimed by another client"})
