@@ -25,6 +25,14 @@ export const sessionRoutes: RouteInfo[] = [
   { method: "POST", path: "/api/sessions/{sid}/pair", purpose: "Re-parear uma conta (emitir novo QR)", requiresSid: true },
   {
     method: "POST",
+    path: "/api/sessions/{sid}/presence",
+    purpose: "Forçar envio de status de presença no WhatsApp (available / unavailable) para atualizar pushname e evitar desconexão por inatividade",
+    payload: { state: "available" },
+    response: { status: "ok", session: "SUA_SESSION_ID", presence: "available" },
+    requiresSid: true,
+  },
+  {
+    method: "POST",
     path: "/api/sessions/{sid}/calls",
     purpose:
       "Iniciar uma chamada de saída. record: true liga a gravação no servidor desta chamada (exige a config de gravação da conta completa — ver seção 3). clinicId define a pasta {clinicId} na chave do bucket.",

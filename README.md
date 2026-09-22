@@ -3,7 +3,7 @@
 # 📞 ArendCalls
 
 **Chamadas de voz nativas do WhatsApp em puro Go e React 19, direto do seu navegador.**
-*Fork corporativo de alta performance baseado no [WaCalls](https://github.com/jobasfernandes/wacalls)*
+*Fork corporativo de alta performance baseado no [WaCalls](https://github.com/jotadev66/wacalls)*
 
 [![Docker](https://img.shields.io/badge/DockerHub-nathanarend%2Farendcalls-blue?logo=docker&logoColor=white)](https://hub.docker.com/r/nathanarend/arendcalls)
 [![Go](https://img.shields.io/badge/Go-1.26+-00ADD8?logo=go&logoColor=white)](https://go.dev)
@@ -34,6 +34,10 @@ Todo o ecossistema VoIP roda **nativamente em puro Go**:
 - Cliente moderno construído em **React 19 + Tailwind CSS**
 - **Sem necessidade de CGO, compiladores C ou DLLs externas** (binário estático)
 
+> [!TIP]
+> **Compatível em paralelo com WAHA / APIs de Mensagens:**
+> Graças à arquitetura Multi-Device (MDv2) do WhatsApp, o **ArendCalls pode ser utilizado em paralelo ao [WAHA](https://waha.devlike.pro/)** ou Evolution API no mesmo número/conta, **sem qualquer interferência**. O WAHA gerencia mensagens de texto, mídias e automações de chat, enquanto o ArendCalls atua de forma independente e dedicada exclusivamente para **chamadas de voz VoIP nativas**.
+
 ---
 
 <a id="diferenciais"></a>
@@ -44,9 +48,11 @@ Este repositório (`ArendCalls`) traz diversas melhorias de engenharia e usabili
 | Recurso | Detalhes |
 |---|---|
 | 🇧🇷 **Interface 100% em Português** | Telas, modais, mensagens de erro, alertas e documentação totalmente traduzidos (pt-BR). |
+| 🤝 **Paralelo com WAHA Sem Interferência** | Opera simultaneamente com o WAHA no mesmo número de WhatsApp. O WAHA cuida das mensagens/mídias e o ArendCalls cuida das ligações de voz. |
+| 🟢 **Keepalive Anti-Desconexão & Presença** | Worker automático diário (ticker em background) e envio inicial em reconexões mantendo o dispositivo "Ativo" no WhatsApp sem expirar os 14 dias de companion devices. Totalmente invisível para contatos (não exibe "online" nos chats). Endpoint manual dedicado `POST /api/sessions/{sid}/presence`. |
 | 🎙️ **Gravação no Servidor** | O ArendCalls grava a chamada (WAV estéreo, atendente/cliente separados), sobe para o Backblaze B2 e avisa por webhook assinado (HMAC). O navegador do atendente não grava nem sobe áudio. Ativação por chamada. |
 | 📴 **Controle de Chamadas Recebidas no Painel** | Interruptor global para o painel exibir (ou não) chamadas recebidas, com override por conta. Permite usar o painel como console administrativo enquanto SSE/webhooks seguem disparando. |
-| ⏸️ **Modo Espera (Hold) Integrado** | Botão no painel de chamada para colocar o cliente em espera tocando música suave sem encerrar a ligação. |
+| ⏸️ **Modo Espera (Hold) Integrado** | Botão no painel de chamada para colocar o cliente em espera reproduzindo áudio de espera sem encerrar a ligação. |
 | ⚡ **Codec MLow Otimizado** | Encode ~2,7× mais rápido (memoização de twiddles do FFT, pool de scratch da busca CELP) — saída de áudio byte a byte idêntica, mais chamadas simultâneas por VPS. |
 | 🛡️ **Autenticação Unificada** | Chave mestra global (`API_KEY`) para segurança nas integrações de backend e cookies de sessão para o painel web. |
 | 🏢 **Gerenciador Visual de Instâncias** | Criar, renomear e gerenciar múltiplas conexões de WhatsApp diretamente pela barra lateral. |
@@ -154,6 +160,8 @@ go run ./cmd/server -addr :8080 -static client/dist
 | `-pprof` | `""` | Se definido, serve `net/http/pprof` nesse endereço (use `127.0.0.1:6060` — **nunca exponha publicamente**) |
 
 **Variáveis de ambiente relevantes:** `API_KEY` (chave mestra),
+`WA_PRESENCE_INTERVAL` (intervalo de keepalive do worker, ex: `24h`, `1h`, padrão: `24h`),
+`WA_PRESENCE_INTERVAL_HOURS` (alternativa numérica para intervalo em horas),
 `RECORDING_CONFIG_KEY` (AES-256-GCM para cifrar credenciais de gravação no
 `wacalls.db` — sem ela, segredos em texto puro + warning), `GOGC` (padrão `200` na
 imagem Docker), `GOMEMLIMIT` (recomendado em produção, ~75% da RAM do container).
@@ -222,6 +230,7 @@ Todas as rotas de API exigem autenticação (ver [Segurança](#seguranca)).
 | `PATCH` | `/api/sessions/{sid}/webhook` | Configurar URL de webhook para eventos |
 | `DELETE` | `/api/sessions/{sid}` | Excluir e desvincular a instância |
 | `POST` | `/api/sessions/{sid}/pair` | Gerar novo QR Code para uma conta desconectada |
+| `POST` | `/api/sessions/{sid}/presence` | Forçar envio de presença (`available` / `unavailable`) para keepalive |
 | `POST` | `/api/sessions/{sid}/logout` | Desconectar sessão (mantém no banco para re-parear) |
 | `POST` | `/api/sessions/{sid}/start` · `/restart` · `/stop` | Controlar o ciclo de vida da conexão da instância |
 | `POST` | `/api/sessions/{sid}/check-number` | Verificar se um número tem WhatsApp |
@@ -366,7 +375,7 @@ curl -s -u usuario:senha "https://call.seudominio.com/api/sessions?apikey=sua_ch
 <a id="creditos"></a>
 ## 👥 Créditos e Agradecimentos
 
-O **ArendCalls** é desenvolvido como um fork aprimorado do projeto de código aberto [WaCalls](https://github.com/jobasfernandes/wacalls), criado por:
+O **ArendCalls** é desenvolvido como um fork aprimorado do projeto de código aberto [WaCalls](https://github.com/jotadev66/wacalls), criado por:
 
 <div align="center">
 

@@ -281,6 +281,30 @@ func TestAPICallEndpointsValidation(t *testing.T) {
 			t.Fatalf("expected status 404 for nonexistent end call, got %d", res.StatusCode)
 		}
 	})
+
+	t.Run("Presence - Session Not Found", func(t *testing.T) {
+		res := doReq("POST", "/api/sessions/nonexistent/presence", map[string]string{"state": "available"})
+		defer res.Body.Close()
+		if res.StatusCode != http.StatusNotFound {
+			t.Fatalf("expected status 404 for nonexistent session, got %d", res.StatusCode)
+		}
+	})
+
+	t.Run("Presence - Invalid State", func(t *testing.T) {
+		res := doReq("POST", "/api/sessions/"+sid+"/presence", map[string]string{"state": "invalid_state"})
+		defer res.Body.Close()
+		if res.StatusCode != http.StatusBadRequest {
+			t.Fatalf("expected status 400 for invalid presence state, got %d", res.StatusCode)
+		}
+	})
+
+	t.Run("Presence - Session Not Connected", func(t *testing.T) {
+		res := doReq("POST", "/api/sessions/"+sid+"/presence", map[string]string{"state": "available"})
+		defer res.Body.Close()
+		if res.StatusCode != http.StatusBadGateway {
+			t.Fatalf("expected status 502 for disconnected session presence, got %d", res.StatusCode)
+		}
+	})
 }
 
 func TestAPICORS(t *testing.T) {

@@ -8,8 +8,13 @@ services:
     network_mode: "host"
     environment:
       - API_KEY=sua_chave_mestra_aqui
+      - WA_PRESENCE_INTERVAL=24h
+      # Chave AES-256-GCM para cifrar credenciais de gravação (se utilizado):
+      # - RECORDING_CONFIG_KEY=troque_por_32_bytes_aleatorios_aqui
+      # - GOMEMLIMIT=1500MiB
     volumes:
       - wacalls_data:/app/data
+      - wacalls_recordings:/app/recordings
     expose:
       - "8080"
     ports:
@@ -30,6 +35,8 @@ services:
 
 volumes:
   wacalls_data:
+    driver: local
+  wacalls_recordings:
     driver: local
 
 networks:

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
 	"sync"
@@ -302,6 +303,15 @@ func (s *Session) handleEvent(rawEvt any) {
 			_ = s.mgr.store.setJID(s.mgr.appCtx, s.id, id.String())
 		}
 		s.setAuth(AuthSnapshot{State: "open", Paired: true})
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			if err := s.client.SendPresence(ctx, types.PresenceAvailable); err != nil {
+				s.log.Warn("failed to send initial presence on connect", "err", err)
+			} else {
+				s.log.Debug("initial presence available sent on connect")
+			}
+		}()
 	case *events.LoggedOut:
 		s.setAuth(AuthSnapshot{State: "logged_out", Paired: false})
 	case *events.CallOffer:
@@ -489,6 +499,16 @@ func (s *Session) replaceClient(client *whatsmeow.Client) {
 func (s *Session) shutdown() {
 	s.teardownAllCalls()
 	s.client.Disconnect()
+}
+
+func (s *Session) SendPresence(ctx context.Context, state types.Presence) error {
+	s.mu.Lock()
+	client := s.client
+	s.mu.Unlock()
+	if client == nil || !client.IsConnected() {
+		return fmt.Errorf("session not connected")
+	}
+	return client.SendPresence(ctx, state)
 }
 
 func mapStatus(state core.CallState) CallStatus {
