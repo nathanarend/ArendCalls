@@ -259,6 +259,18 @@ func (s *Session) onIncomingOffer(ctx context.Context, evt *events.CallOffer) {
 	if _, exists := s.reg.get(callID); exists {
 		return
 	}
+	// Chamada entre duas sessões deste servidor: quem ligou já é dono deste
+	// callID. Se esta sessão também registrasse a oferta, as duas disputariam o
+	// mesmo registro no broker (indexado só por callID) e o card sumiria do
+	// painel de quem ligou. Aqui a chamada toca só no celular.
+	if origin, found := s.mgr.FindSessionByCall(callID); found {
+		if ac, ok := origin.reg.get(callID); ok {
+			if c := ac.cm.CurrentCall(); c != nil && c.Direction == core.CallDirectionOutgoing {
+				s.log.Info("ignoring inbound offer for call placed by another session", "call_id", callID, "origin_session", origin.id)
+				return
+			}
+		}
+	}
 	if s.client.Store.ID != nil {
 		info := signaling.ExtractNodeInfo(node)
 		if info != nil {
