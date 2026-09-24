@@ -303,13 +303,17 @@ func (s *Session) handleEvent(rawEvt any) {
 			_ = s.mgr.store.setJID(s.mgr.appCtx, s.id, id.String())
 		}
 		s.setAuth(AuthSnapshot{State: "open", Paired: true})
+		// Unavailable já leva o pushname (evita o "-" nos contatos). Não usar
+		// available aqui: o aparelho ficaria "online" direto e o servidor passa
+		// a empurrar chatstate/presence, que disputam a fila de eventos com a
+		// sinalização das chamadas.
 		go func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
-			if err := s.client.SendPresence(ctx, types.PresenceAvailable); err != nil {
+			if err := s.client.SendPresence(ctx, types.PresenceUnavailable); err != nil {
 				s.log.Warn("failed to send initial presence on connect", "err", err)
 			} else {
-				s.log.Debug("initial presence available sent on connect")
+				s.log.Debug("initial presence unavailable sent on connect")
 			}
 		}()
 	case *events.LoggedOut:
@@ -376,7 +380,7 @@ func (s *Session) handleEvent(rawEvt any) {
 			}
 		}
 	case *events.Receipt:
-		s.log.Info("receipt received", "type", string(evt.Type), "sender", evt.Sender.String())
+		s.log.Debug("receipt received", "type", string(evt.Type), "sender", evt.Sender.String())
 		if evt.Type == types.ReceiptTypeDelivered || string(evt.Type) == "ringer" {
 			peerJID := evt.Sender
 			if peerJID.Server == "lid" {

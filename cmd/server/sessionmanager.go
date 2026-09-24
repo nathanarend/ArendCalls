@@ -390,6 +390,10 @@ func (m *SessionManager) SessionCounts() (total int, connected int) {
 	return total, connected
 }
 
+// presencePulseDuration é quanto tempo a sessão fica "available" em cada pulso
+// do keepalive antes de voltar para unavailable.
+const presencePulseDuration = 30 * time.Second
+
 func (m *SessionManager) startPresenceKeepalive() {
 	interval := 24 * time.Hour
 	if durVal := os.Getenv("WA_PRESENCE_INTERVAL"); durVal != "" {
@@ -410,7 +414,15 @@ func (m *SessionManager) startPresenceKeepalive() {
 			case <-m.appCtx.Done():
 				return
 			case <-ticker.C:
+				// Pulso: marca atividade e volta para unavailable, senão a
+				// sessão fica "online" até o próximo reconnect.
 				m.sendPresenceToAll(types.PresenceAvailable)
+				select {
+				case <-m.appCtx.Done():
+					return
+				case <-time.After(presencePulseDuration):
+				}
+				m.sendPresenceToAll(types.PresenceUnavailable)
 			}
 		}
 	}()
