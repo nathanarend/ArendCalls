@@ -57,6 +57,10 @@ type CallManager struct {
 	rxDedupIdx     int
 	rxDedupFilled  bool
 
+	// rx: telemetria do áudio recebido (ver rxstats.go). Sobrevive ao
+	// cleanupMedia para ser lida no fim da chamada.
+	rx rxStats
+
 	OnStateChange    func(*CallInfo)
 	OnIncoming       func(*CallInfo)
 	OnEnded          func(*CallInfo)
@@ -75,7 +79,7 @@ func NewCallManager(sock core.VoipSocket, log *slog.Logger) *CallManager {
 	}
 	relay := transport.NewSctpRelayManager(log)
 	relay.SetOnConnected(func(ip string, port int) { m.onRelayConnected() })
-	relay.SetOnReceive(func(data []byte) { m.onRelayData(data) })
+	relay.SetOnReceive(func(data []byte, relayName string) { m.onRelayData(data, relayName) })
 	m.relay = relay
 	return m
 }

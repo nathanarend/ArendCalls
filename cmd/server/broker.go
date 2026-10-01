@@ -254,7 +254,10 @@ func (b *Broker) ownerActiveCall(owner string) string {
 	return ""
 }
 
-func (b *Broker) endCall(id, reason string) {
+// endCall fecha o registro da chamada e emite call-ended. stats é a telemetria
+// de áudio (nil quando quem encerra não tem o CallManager em mãos); vai no
+// evento como "audioStats" — idempotente, então a 1ª chamada é a que conta.
+func (b *Broker) endCall(id, reason string, stats *callAudioStats) {
 	b.mu.Lock()
 	c, ok := b.calls[id]
 	if !ok {
@@ -272,9 +275,13 @@ func (b *Broker) endCall(id, reason string) {
 	sessionID := c.SessionID
 	b.mu.Unlock()
 
-	b.broadcast(map[string]any{
+	ev := map[string]any{
 		"type": "call-ended", "sessionId": sessionID, "id": id, "owner": owner, "reason": reason, "endedAt": now,
-	})
+	}
+	if stats != nil {
+		ev["audioStats"] = stats
+	}
+	b.broadcast(ev)
 	b.broadcastCallList()
 }
 

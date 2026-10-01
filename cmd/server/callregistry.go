@@ -14,9 +14,43 @@ import (
 type activeCall struct {
 	cm     *call.CallManager
 	bridge *Bridge
-	// rec is the live call recorder, set once media connects when the call is
+	// rec is the live call recorder, set once the call is answered when it is
 	// armed for recording. Loaded lock-free on the audio hot path.
 	rec atomic.Pointer[recording.Recorder]
+	// recTried: o primeiro áudio do paciente já tentou iniciar a gravação.
+	// Evita lock/lookup em recordingController a cada pacote (~16/s).
+	recTried atomic.Bool
+	// stopRinging para o timer anti-zumbi da chamada (ver wireCall).
+	stopRinging func()
+	// bridgeSendErrors: falhas de Bridge.WritePCM (DataChannel → navegador).
+	// Fica na chamada, não no Bridge, porque o Bridge é trocado na reconexão.
+	bridgeSendErrors atomic.Int64
+}
+
+// callAudioStats é a telemetria de áudio de uma chamada: logada no fim e
+// enviada no evento call-ended. Buraco aqui e no Mocho → lado WhatsApp;
+// buraco só no Mocho → trecho servidor → navegador.
+type callAudioStats struct {
+	RxPackets        int64  `json:"rxPackets"`
+	RxGapsSpeech     int64  `json:"rxGapsSpeech"`
+	RxMaxGapSpeechMs int64  `json:"rxMaxGapSpeechMs"`
+	RxUndecodable    int64  `json:"rxUndecodable"`
+	RxRelock         int64  `json:"rxRelock"`
+	RelayUsed        string `json:"relayUsed,omitempty"`
+	BridgeSendErrors int64  `json:"bridgeSendErrors"`
+}
+
+func (ac *activeCall) audioStats() callAudioStats {
+	rx := ac.cm.RxStats()
+	return callAudioStats{
+		RxPackets:        rx.Packets,
+		RxGapsSpeech:     rx.SpeechGaps,
+		RxMaxGapSpeechMs: rx.MaxSpeechGap.Milliseconds(),
+		RxUndecodable:    rx.Undecodable,
+		RxRelock:         rx.Relocks,
+		RelayUsed:        rx.Relay,
+		BridgeSendErrors: ac.bridgeSendErrors.Load(),
+	}
 }
 
 type callRegistry struct {

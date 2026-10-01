@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"runtime/debug"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"wacalls/internal/voip/call"
@@ -52,10 +54,14 @@ func newSession(mgr *SessionManager, id, name, webhookURL string, panelInbound b
 	return s
 }
 
+// ringingTimeout: tempo máximo de uma chamada sem atender/conectar antes do
+// timer anti-zumbi encerrá-la. Variável (não const) para os testes.
+var ringingTimeout = 90 * time.Second
+
 func (s *Session) createCall(callID string) *call.CallManager {
 	cm := call.NewCallManager(wa.NewSocket(s.client), s.log)
-	s.wireCall(cm, callID)
-	s.reg.add(callID, &activeCall{cm: cm})
+	stopRinging := s.wireCall(cm, callID)
+	s.reg.add(callID, &activeCall{cm: cm, stopRinging: stopRinging})
 	return cm
 }
 
@@ -105,7 +111,9 @@ func (s *Session) resolvePeerName(peerStr string) string {
 	return ""
 }
 
-func (s *Session) wireCall(cm *call.CallManager, callID string) {
+// wireCall liga os callbacks do CallManager à sessão e arma o timer
+// anti-zumbi. Devolve a função que para o timer (guardada no activeCall).
+func (s *Session) wireCall(cm *call.CallManager, callID string) (stopRinging func()) {
 	var timeoutTimer *time.Timer
 	var timeoutMu sync.Mutex
 
@@ -124,7 +132,11 @@ func (s *Session) wireCall(cm *call.CallManager, callID string) {
 		if timeoutTimer != nil {
 			timeoutTimer.Stop()
 		}
-		timeoutTimer = time.AfterFunc(90*time.Second, func() {
+		timeoutTimer = time.AfterFunc(ringingTimeout, func() {
+			// Já saiu do registro (fim normal, discagem que falhou): nada a fazer.
+			if _, ok := s.reg.get(callID); !ok {
+				return
+			}
 			// Antes de encerrar, verificar se a chamada já está ativa em outra sessão.
 			// Isso evita que sessões-espelho (multi-device) derrubem chamadas legítimas.
 			if s.mgr.broker.isCallConnected(callID) {
@@ -132,12 +144,15 @@ func (s *Session) wireCall(cm *call.CallManager, callID string) {
 				s.removeCall(callID)
 				return
 			}
-			s.log.Info("call ringing timeout reached (90s), ending stale call", "call_id", callID)
+			s.log.Info("call ringing timeout reached, ending stale call", "call_id", callID, "after", ringingTimeout)
 			_ = cm.EndCall(context.Background(), core.EndCallReason("timeout"))
+			// EndCall não faz nada se a oferta nunca virou chamada (currentCall
+			// nil); sem isto a entrada vaza no registro.
+			s.removeCall(callID)
 		})
 	}
 
-	// Inicia o timer de 60s para evitar chamada zumbi
+	// Timer anti-zumbi: encerra a chamada que não atende nem conecta.
 	startTimeout()
 
 	cm.OnIncoming = func(c *call.CallInfo) {
@@ -151,18 +166,14 @@ func (s *Session) wireCall(cm *call.CallManager, callID string) {
 	}
 	cm.OnStateChange = func(c *call.CallInfo) {
 		if c.IsEnded() {
-			stopTimeout()
-			if s.mgr.rec != nil {
-				s.mgr.rec.onCallEnded(c.CallID)
-			}
-			s.removeCall(c.CallID)
-			s.mgr.broker.endCall(c.CallID, string(c.StateData.EndReason))
+			s.finishCall(c)
 			return
 		}
 		if c.StateData.State == core.CallStateActive || c.StateData.State == core.CallStateConnecting {
 			stopTimeout()
 		}
-		// Recording only starts once the call is answered — never while ringing.
+		// Atendida (accept + mídia). Junto com o 1º áudio do paciente
+		// (OnPeerAudio), é o que inicia a gravação — nunca o toque.
 		if c.StateData.State == core.CallStateActive {
 			s.startRecordingIfArmed(c.CallID)
 		}
@@ -185,20 +196,23 @@ func (s *Session) wireCall(cm *call.CallManager, callID string) {
 		s.mgr.broker.upsertCall(rec)
 	}
 	cm.OnEnded = func(c *call.CallInfo) {
-		stopTimeout()
-		if s.mgr.rec != nil {
-			s.mgr.rec.onCallEnded(c.CallID)
-		}
-		s.removeCall(c.CallID)
-		s.mgr.broker.endCall(c.CallID, string(c.StateData.EndReason))
+		s.finishCall(c)
 	}
 	cm.OnPeerAudio = func(pcm16 []float32) {
 		ac, ok := s.reg.get(callID)
 		if !ok {
 			return
 		}
+		// Primeiro áudio do paciente = atendeu: o WhatsApp não manda áudio do
+		// peer durante o toque (no silêncio manda ruído de conforto, que também
+		// chega aqui). Antes do WritePeer para o 1º frame entrar no WAV.
+		if ac.recTried.CompareAndSwap(false, true) {
+			s.startRecordingIfArmed(callID)
+		}
 		if ac.bridge != nil {
-			_ = ac.bridge.WritePCM(pcm16)
+			if err := ac.bridge.WritePCM(pcm16); err != nil {
+				ac.bridgeSendErrors.Add(1)
+			}
 		}
 		if r := ac.rec.Load(); r != nil {
 			r.WritePeer(pcm16)
@@ -207,17 +221,45 @@ func (s *Session) wireCall(cm *call.CallManager, callID string) {
 	// Cancela o timer anti-zombie quando o relay de mídia conecta.
 	// Crucial para sessões-espelho (multi-device) que ficam em IncomingRinging
 	// enquanto outra sessão já aceitou a chamada — sem isso o timer derruba a ligação.
+	// Relay conectado NÃO é atendimento: na saída ele conecta antes do toque,
+	// então não inicia gravação aqui.
+	var relayLogged atomic.Bool
 	cm.OnRelayConnected = func() {
-		s.log.Info("relay connected: cancelling ringing timeout", "call_id", callID)
+		// O callback dispara uma vez por relay (~3 por ligação); loga só o 1º.
+		if relayLogged.CompareAndSwap(false, true) {
+			s.log.Info("relay connected: cancelling ringing timeout", "call_id", callID)
+		}
 		stopTimeout()
-		// Media is flowing, which for an outbound call means it was answered.
-		s.startRecordingIfArmed(callID)
 	}
+	return stopTimeout
+}
+
+// finishCall encerra a chamada na sessão: fecha a gravação, tira do registro,
+// loga a telemetria de áudio e emite call-ended. Chamado por OnStateChange
+// (estado Ended) e por OnEnded — só a primeira passada acha a chamada no
+// registro, então o log e as stats saem uma vez. Roda com o m.mu do
+// CallManager travado (emitState): nada aqui pode chamar o CallManager além
+// de RxStats.
+func (s *Session) finishCall(c *call.CallInfo) {
+	if s.mgr.rec != nil {
+		s.mgr.rec.onCallEnded(c.CallID)
+	}
+	var stats *callAudioStats
+	if ac := s.removeCall(c.CallID); ac != nil {
+		st := ac.audioStats()
+		stats = &st
+		s.log.Info("call audio stats", "call_id", c.CallID,
+			"rx_packets", st.RxPackets, "rx_gaps_speech", st.RxGapsSpeech,
+			"rx_max_gap_speech_ms", st.RxMaxGapSpeechMs, "rx_undecodable", st.RxUndecodable,
+			"rx_relock", st.RxRelock, "relay_used", st.RelayUsed,
+			"bridge_send_errors", st.BridgeSendErrors)
+	}
+	s.mgr.broker.endCall(c.CallID, string(c.StateData.EndReason), stats)
 }
 
 // startRecordingIfArmed begins the WAV capture for a call that asked for
-// recording, once it is answered. Idempotent — fires from both the answered
-// state change and the media-relay-connected hook, whichever lands first.
+// recording, once it is answered. Idempotent — fires from both the Active
+// state change and the first peer audio packet, whichever lands first.
 func (s *Session) startRecordingIfArmed(callID string) {
 	if s.mgr.rec == nil || !s.mgr.rec.armed(callID) {
 		return
@@ -290,7 +332,22 @@ func (s *Session) onIncomingOffer(ctx context.Context, evt *events.CallOffer) {
 		return
 	}
 	cm := s.createCall(callID)
-	cm.HandleCallOffer(ctx, node, evt.From)
+	// Panic aqui some: o whatsmeow recupera panic de event handler e loga no
+	// logger dele, que é Noop fora do -debug. A chamada ficava no registro sem
+	// currentCall e o timer de toque nunca a removia (chamada fantasma).
+	defer func() {
+		if r := recover(); r != nil {
+			s.log.Error("inbound offer handling panicked, dropping call", "call_id", callID,
+				"panic", r, "children", call.ChildTagSummary(evt.Data), "stack", string(debug.Stack()))
+			s.removeCall(callID)
+			s.mgr.broker.endCall(callID, "error", nil)
+		}
+	}()
+	if !cm.HandleCallOffer(ctx, node, evt.From) {
+		s.log.Warn("inbound offer not handled, dropping call", "call_id", callID,
+			"children", call.ChildTagSummary(evt.Data))
+		s.removeCall(callID)
+	}
 }
 
 func (s *Session) rejectOffer(ctx context.Context, node *waBinary.Node, from types.JID) {
@@ -308,6 +365,14 @@ func (s *Session) rejectOffer(ctx context.Context, node *waBinary.Node, from typ
 }
 
 func (s *Session) handleEvent(rawEvt any) {
+	// Mesmo motivo do recover em onIncomingOffer: sem isto um panic aqui só
+	// apareceria com -debug.
+	defer func() {
+		if r := recover(); r != nil {
+			s.log.Error("event handler panicked", "event", fmt.Sprintf("%T", rawEvt),
+				"panic", r, "stack", string(debug.Stack()))
+		}
+	}()
 	ctx := context.Background()
 	switch evt := rawEvt.(type) {
 	case *events.Connected:
@@ -478,14 +543,20 @@ func (s *Session) setBridge(callID string, b *Bridge) {
 	}
 }
 
-func (s *Session) removeCall(callID string) {
+// removeCall tira a chamada do registro, para o timer de toque e fecha o
+// Bridge. Devolve a chamada removida, ou nil se ela já tinha saído.
+func (s *Session) removeCall(callID string) *activeCall {
 	ac, ok := s.reg.remove(callID)
 	if !ok {
-		return
+		return nil
+	}
+	if ac.stopRinging != nil {
+		ac.stopRinging()
 	}
 	if ac.bridge != nil {
 		ac.bridge.Close()
 	}
+	return ac
 }
 
 func (s *Session) terminateCall(callID string, reason core.EndCallReason) {
@@ -498,6 +569,9 @@ func (s *Session) terminateCall(callID string, reason core.EndCallReason) {
 
 func (s *Session) teardownAllCalls() {
 	for _, ac := range s.reg.drain() {
+		if ac.stopRinging != nil {
+			ac.stopRinging()
+		}
 		_ = ac.cm.EndCall(context.Background(), core.EndCallReasonUserEnded)
 		if ac.bridge != nil {
 			ac.bridge.Close()

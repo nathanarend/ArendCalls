@@ -89,7 +89,7 @@ export const recordingRoutes: RouteInfo[] = [
     method: "GET",
     path: "/api/sessions/{sid}/recordings",
     purpose:
-      "Monitoramento: as gravações recentes da conta (até 50), contagem por status, uso de disco local em bytes e se o destino está configurado. Status possíveis: recording, uploading, ready, failed, skipped (< 5s).",
+      "Monitoramento: as gravações recentes da conta (até 50), contagem por status, uso de disco local em bytes e se o destino está configurado. Status possíveis: recording, uploading, ready, failed, skipped (< 5s ou não atendida — motivo em error).",
     response: {
       configured: true,
       missing: [],
@@ -117,7 +117,7 @@ export const recordingRoutes: RouteInfo[] = [
   {
     method: "GET",
     path: "/api/sessions/{sid}/calls/{id}/recording-info",
-    purpose: "Metadados da gravação de UMA chamada — para o app consumidor reconciliar quando o webhook 'gravação pronta' se perdeu. 404 se a chamada não foi gravada.",
+    purpose: "Metadados da gravação de UMA chamada — para o app consumidor reconciliar quando o webhook 'gravação pronta' se perdeu. Chamada pedida com gravação que não foi atendida volta status 'skipped' com error 'not answered'; 404 só para chamada sem gravação pedida ou desconhecida.",
     response: {
       callId: "1A2B3C...",
       sessionId: "SUA_SESSION_ID",

@@ -306,7 +306,8 @@ navegador do atendente não grava, não codifica e não sobe áudio.
 
 **Fluxo:** começa quando a chamada é atendida (nunca no toque), sobrevive a
 hold/transferência, teto de 40 min, grava a duração exata pelo relógio do servidor,
-descarta gravações < 5 s. Uma **fila durável** (`call_recordings` no SQLite) drenada
+descarta gravações < 5 s (ligação não atendida não grava nada: `skipped` com
+`error = "not answered"`). Uma **fila durável** (`call_recordings` no SQLite) drenada
 por um **pool de workers** garante que uma rajada de encerramentos não vire uma
 rajada de uploads. Depois do upload verificado (`HeadObject`), o WAV local é apagado.
 

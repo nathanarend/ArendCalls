@@ -110,7 +110,7 @@ func (m *CallManager) startSilenceKeepaliveLocked() {
 	}()
 }
 
-func (m *CallManager) onRelayData(data []byte) {
+func (m *CallManager) onRelayData(data []byte, relay string) {
 	if transport.IsStunPacket(data) {
 		return
 	}
@@ -195,6 +195,7 @@ func (m *CallManager) onRelayData(data []byte) {
 
 	pkt, err := srtp.Unprotect(data)
 	if err != nil {
+		m.rx.dropped()
 		m.log.Debug("srtp unprotect error", "err", err)
 		return
 	}
@@ -203,6 +204,7 @@ func (m *CallManager) onRelayData(data []byte) {
 	}
 	pcm, err := codec.Decode(pkt.Payload)
 	if err != nil {
+		m.rx.dropped()
 		return // decode failed → lock unchanged, failover not taken
 	}
 
@@ -219,6 +221,7 @@ func (m *CallManager) onRelayData(data []byte) {
 		} else if failoverTry && ssrc != m.rxLockedSsrc &&
 			nowNs-m.rxLockedLastNs > int64(rxFailoverSilence) {
 			m.log.Debug("rx peer ssrc re-lock (previous went silent)", "from", m.rxLockedSsrc, "to", ssrc)
+			m.rx.relocked()
 			m.rxLockedSsrc = ssrc
 			m.rxLockedLastNs = nowNs
 		}
@@ -226,6 +229,7 @@ func (m *CallManager) onRelayData(data []byte) {
 	}
 
 	pcm = media.NormalizeFrame(pcm, codec.FrameSize())
+	m.rx.decoded(nowNs, pcm, relay)
 	if m.OnPeerAudio != nil {
 		m.OnPeerAudio(pcm)
 	}

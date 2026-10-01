@@ -14,7 +14,7 @@ const (
 	RecStatusUploading RecordingStatus = "uploading" // finished, queued for B2
 	RecStatusReady     RecordingStatus = "ready"     // in B2, webhook maybe still owed
 	RecStatusFailed    RecordingStatus = "failed"    // last attempt errored, will retry
-	RecStatusSkipped   RecordingStatus = "skipped"   // too short (<5s) — not uploaded
+	RecStatusSkipped   RecordingStatus = "skipped"   // too short (<5s) or not answered — not uploaded
 )
 
 // minRecordingDuration: recordings shorter than this are discarded, not uploaded.
@@ -216,6 +216,21 @@ func (s *recordingStore) markUploaded(ctx context.Context, callID, b2Key, b2URL 
 	_, err := s.db.ExecContext(ctx, `UPDATE call_recordings
 		SET status=?, b2_key=?, b2_url=?, error='' WHERE call_id=?`,
 		string(RecStatusReady), b2Key, b2URL, callID)
+	return err
+}
+
+// insertSkipped registra uma chamada armada que terminou sem gravar (não
+// atendida): a linha já nasce skipped, para o recording-info responder algo
+// definitivo — 404 fica só para chamada desconhecida. Não sobrescreve linha
+// existente.
+func (s *recordingStore) insertSkipped(ctx context.Context, r RecordingRow, reason string) error {
+	now := time.Now().UnixMilli()
+	_, err := s.db.ExecContext(ctx, `INSERT INTO call_recordings
+		(call_id, session_id, clinic_id, status, channels, direction, peer, started_at, ended_at, error, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)
+		ON CONFLICT(call_id) DO NOTHING`,
+		r.CallID, r.SessionID, r.ClinicID, string(RecStatusSkipped), r.Channels,
+		r.Direction, r.Peer, r.EndedAt, reason, now)
 	return err
 }
 

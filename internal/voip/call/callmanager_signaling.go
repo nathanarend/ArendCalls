@@ -11,10 +11,13 @@ import (
 	"go.mau.fi/whatsmeow/types"
 )
 
-func (m *CallManager) HandleCallOffer(ctx context.Context, node *waBinary.Node, peerJid types.JID) {
+// HandleCallOffer registra a oferta de entrada como a chamada atual. Devolve
+// false se a oferta não tem o nó interno — quem chamou deve descartar a
+// chamada, senão ela fica no registro sem currentCall.
+func (m *CallManager) HandleCallOffer(ctx context.Context, node *waBinary.Node, peerJid types.JID) bool {
 	info := signaling.ExtractNodeInfo(node)
 	if info == nil {
-		return
+		return false
 	}
 	callID := info.CallID
 	creator := wanode.AttrString(info.InnerNode.Attrs, "call-creator")
@@ -42,7 +45,7 @@ func (m *CallManager) HandleCallOffer(ctx context.Context, node *waBinary.Node, 
 	}
 	// Diagnostic: show the offer's child structure so we can see whether relays
 	// are present (and in which form) or genuinely arrive later.
-	m.log.Debug("offer inner node structure", "call_id", callID, "children", childTagSummary(info.InnerNode))
+	m.log.Debug("offer inner node structure", "call_id", callID, "children", ChildTagSummary(info.InnerNode))
 
 	mediaType := core.CallMediaTypeAudio
 	if isVideo {
@@ -92,6 +95,7 @@ func (m *CallManager) HandleCallOffer(ctx context.Context, node *waBinary.Node, 
 	m.emitState()
 	m.mu.Unlock()
 	m.log.Info("incoming call", "call_id", callID, "peer", peerJid.String(), "video", isVideo, "relays", len(relays))
+	return true
 }
 
 func (m *CallManager) HandleCallAccept(ctx context.Context, node *waBinary.Node, peerJid types.JID) {

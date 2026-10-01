@@ -615,7 +615,7 @@ func (s *server) doReject(sess *Session, w http.ResponseWriter, r *http.Request)
 		return
 	}
 	sess.removeCall(id)
-	s.broker.endCall(id, string(core.EndCallReasonDeclined))
+	s.broker.endCall(id, string(core.EndCallReasonDeclined), nil)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
@@ -637,7 +637,7 @@ func (s *server) doEndCall(sess *Session, w http.ResponseWriter, r *http.Request
 		return
 	}
 	sess.removeCall(id)
-	s.broker.endCall(id, string(core.EndCallReasonUserEnded))
+	s.broker.endCall(id, string(core.EndCallReasonUserEnded), nil)
 	w.WriteHeader(http.StatusNoContent)
 }
 

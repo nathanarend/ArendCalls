@@ -52,10 +52,10 @@ func firstSsrc(s []uint32) uint32 {
 	return 0
 }
 
-// childTagSummary renders a node's immediate children as "tag[subtag,subtag]"
+// ChildTagSummary renders a node's immediate children as "tag[subtag,subtag]"
 // for diagnostics — e.g. seeing whether an offer carries a structured
 // "relay[key,token,te2]" node or no relay node at all.
-func childTagSummary(n *waBinary.Node) string {
+func ChildTagSummary(n *waBinary.Node) string {
 	if n == nil {
 		return "<nil>"
 	}
