@@ -59,7 +59,7 @@ type SctpRelayManager struct {
 
 	onConnected func(ip string, port int)
 
-	onReceive func(data []byte)
+	onReceive func(data []byte, relay string)
 }
 
 func NewSctpRelayManager(log *slog.Logger) *SctpRelayManager {
@@ -78,7 +78,9 @@ func (m *SctpRelayManager) SetSubscriptionSsrc(ssrc uint32) { m.subscriptionSsrc
 
 func (m *SctpRelayManager) SetOnConnected(fn func(ip string, port int)) { m.onConnected = fn }
 
-func (m *SctpRelayManager) SetOnReceive(fn func(data []byte)) { m.onReceive = fn }
+// SetOnReceive registers the inbound handler. relay is the RelayConfig.Name the
+// packet arrived on (several relays forward the same stream).
+func (m *SctpRelayManager) SetOnReceive(fn func(data []byte, relay string)) { m.onReceive = fn }
 
 func (m *SctpRelayManager) ResendSubscriptions() {
 	m.mu.Lock()
@@ -176,7 +178,7 @@ func (m *SctpRelayManager) connectToRelay(info RelayConfig) {
 	channel.OnClose(func() { m.closeConnection(id) })
 	channel.OnMessage(func(msg webrtc.DataChannelMessage) {
 		if m.onReceive != nil {
-			m.onReceive(msg.Data)
+			m.onReceive(msg.Data, info.Name)
 		}
 	})
 

@@ -145,3 +145,27 @@ func TestRecordingControllerSalvagesOnRestart(t *testing.T) {
 		t.Errorf("lost recording status = %q, want failed", gone.Status)
 	}
 }
+
+// Chamada armada que termina sem atender: linha skipped "not answered", para o
+// recording-info não responder 404 (que fica para chamada desconhecida).
+func TestRecordingNotAnsweredGetsSkippedRow(t *testing.T) {
+	ctl, store, _ := newTestRecCtl(t)
+	const callID = "call-not-answered"
+	ctl.arm(recMeta{callID: callID, sessionID: "sess-1", clinicID: "clinic-9", direction: "outbound", peer: "55110001@s.whatsapp.net"})
+
+	ctl.onCallEnded(callID)
+
+	row, err := store.get(context.Background(), callID)
+	if err != nil || row == nil {
+		t.Fatalf("expected a skipped row, got %v / %v", row, err)
+	}
+	if row.Status != RecStatusSkipped || row.Err != "not answered" {
+		t.Fatalf("got %s / %q, want skipped / not answered", row.Status, row.Err)
+	}
+	if row.StartedAt != 0 || row.EndedAt == 0 || row.ClinicID != "clinic-9" || row.Direction != "outbound" {
+		t.Fatalf("unexpected row: %+v", row)
+	}
+	if ctl.armed(callID) {
+		t.Fatal("call should be disarmed after it ended")
+	}
+}

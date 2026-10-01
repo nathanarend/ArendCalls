@@ -19,7 +19,7 @@ func TestOwnerActiveCall(t *testing.T) {
 		t.Fatalf("empty owner must return empty, got %q", got)
 	}
 
-	b.endCall("c1", "done")
+	b.endCall("c1", "done", nil)
 	if got := b.ownerActiveCall("op-A"); got != "" {
 		t.Fatalf("op-A's call ended, expected empty, got %q", got)
 	}

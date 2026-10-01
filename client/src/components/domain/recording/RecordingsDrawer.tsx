@@ -14,7 +14,7 @@ const statusLabel: Record<RecordingStatus, string> = {
   uploading: "Enviando",
   ready: "Pronta",
   failed: "Falhou",
-  skipped: "Ignorada (<5s)",
+  skipped: "Ignorada",
 };
 
 const statusVariant: Record<RecordingStatus, "success" | "secondary" | "muted" | "destructive"> = {
@@ -24,6 +24,10 @@ const statusVariant: Record<RecordingStatus, "success" | "secondary" | "muted" |
   failed: "destructive",
   skipped: "muted",
 };
+
+// skipped cobre dois casos; o motivo vem em error ("not answered" ou "< 5s").
+const rowLabel = (r: RecordingItem) =>
+  r.status !== "skipped" ? statusLabel[r.status] : r.error === "not answered" ? "Não atendida" : "Ignorada (<5s)";
 
 const fmtDuration = (ms: number) => {
   const s = Math.round(ms / 1000);
@@ -40,7 +44,7 @@ const RecordingRow = ({ r }: { r: RecordingItem }) => (
   <li className="rounded-lg border p-3 space-y-1">
     <div className="flex items-center justify-between gap-2">
       <span className="font-medium truncate">{r.peer || r.callId}</span>
-      <Badge variant={statusVariant[r.status]}>{statusLabel[r.status]}</Badge>
+      <Badge variant={statusVariant[r.status]}>{rowLabel(r)}</Badge>
     </div>
     <p className="text-xs text-muted-foreground">
       {r.direction === "outbound" ? "Efetuada" : "Recebida"}

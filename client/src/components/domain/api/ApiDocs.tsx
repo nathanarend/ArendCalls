@@ -174,7 +174,7 @@ export const ApiDocs = () => {
             <li>O destino (B2 + webhook) é <strong>individual por conta</strong>, configurado no painel do ArendCalls (engrenagem da conta → "Gravação de Chamadas"). <strong>Os apps não passam credenciais.</strong></li>
             <li><strong>Saída:</strong> grava por chamada — <code>record: true</code> no <code>POST /api/sessions/{'{sid}'}/calls</code>.</li>
             <li><strong>Entrada:</strong> <code>record: true</code> no <code>POST /api/sessions/{'{sid}'}/calls/{'{id}'}/accept</code>, ou a opção "gravar chamadas recebidas" na config da conta (grava todas).</li>
-            <li>Só grava <strong>depois que a chamada é atendida</strong>. Gravações com menos de <strong>5 segundos</strong> são descartadas (status <code>skipped</code>).</li>
+            <li>Só grava <strong>depois que a chamada é atendida</strong>. Gravações com menos de <strong>5 segundos</strong> são descartadas, e chamadas que não foram atendidas não geram gravação (status <code>skipped</code>, motivo em <code>error</code>).</li>
             <li>O envio passa por uma <strong>fila persistente</strong> com um pool de workers (padrão 3). Uma rajada de chamadas encerrando não vira uma rajada de uploads. Falhas são reenviadas com backoff (1min → 5min → 15min → 1h) e sobrevivem a reinício do servidor.</li>
             <li>O arquivo local só é apagado <strong>depois</strong> do B2 confirmar (existência + tamanho). Sem o destino configurado, o WAV fica no disco aguardando — nada é perdido.</li>
           </ul>

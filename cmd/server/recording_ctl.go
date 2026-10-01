@@ -106,8 +106,9 @@ func (c *recordingController) armed(callID string) bool {
 	return ok
 }
 
-// onAnswered starts the WAV capture. Called when the call is answered / media is
-// live — never while it is still ringing. Idempotent.
+// onAnswered starts the WAV capture. Called when the call is answered (Active
+// state or first peer audio) — never while it is still ringing: on outbound
+// calls the media relay connects before the phone even rings. Idempotent.
 func (c *recordingController) onAnswered(callID string) *recording.Recorder {
 	c.mu.Lock()
 	lr, ok := c.live[callID]
@@ -161,6 +162,7 @@ func (c *recordingController) onAnswered(callID string) *recording.Recorder {
 }
 
 // onCallEnded finalizes the WAV and either skips it (<5s) or queues it for upload.
+// An armed call that was never answered gets a skipped row ("not answered").
 func (c *recordingController) onCallEnded(callID string) {
 	c.mu.Lock()
 	lr, ok := c.live[callID]
@@ -169,14 +171,33 @@ func (c *recordingController) onCallEnded(callID string) {
 		return
 	}
 	delete(c.live, callID)
+	started := lr.started
 	c.mu.Unlock()
 
 	lr.stopOnce.Do(func() {
+		if !started {
+			c.skipNotAnswered(lr.meta)
+			return
+		}
 		if lr.rec == nil {
-			return // armed but never answered — nothing was recorded
+			return // onAnswered still setting up — it finalizes the WAV itself
 		}
 		c.finalizeRecording(callID, lr.path, lr.rec)
 	})
+}
+
+// skipNotAnswered records that an armed call ended before it was answered.
+func (c *recordingController) skipNotAnswered(meta recMeta) {
+	err := c.store.insertSkipped(c.appCtx, RecordingRow{
+		CallID: meta.callID, SessionID: meta.sessionID, ClinicID: meta.clinicID,
+		Channels: "stereo", Direction: meta.direction, Peer: meta.peer,
+		EndedAt: time.Now().UnixMilli(),
+	}, "not answered")
+	if err != nil {
+		c.log.Error("recording: cannot persist not-answered skip", "call", meta.callID, "err", err)
+		return
+	}
+	c.log.Info("recording skipped (not answered)", "call", meta.callID, "session", meta.sessionID)
 }
 
 // finalizeRecording closes the WAV, measures the exact duration, and routes it:
