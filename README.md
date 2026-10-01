@@ -151,7 +151,7 @@ go run ./cmd/server -addr :8080 -static client/dist
 |---|---|---|
 | `-addr` | `:8080` | Endereço e porta de escuta HTTP |
 | `-db` | `wacalls.db` | Caminho do arquivo de banco SQLite das instâncias |
-| `-static` | `client/dist` | Pasta com os arquivos estáticos do frontend compilado |
+| `-static` | `client/dist` | Pasta com os arquivos estáticos do frontend compilado (sem a flag, procura `client/dist` ao lado do executável e depois no diretório atual) |
 | `-debug` | `false` | Habilita logs detalhados do WhatsApp e WebRTC |
 | `-max-calls` | `0` | Limite de chamadas simultâneas por conta (`0` = sem limite) |
 | `-apikey` | `""` | Define a Chave de Super-Usuário (sobrescreve a env `API_KEY`) |
@@ -165,6 +165,41 @@ go run ./cmd/server -addr :8080 -static client/dist
 `RECORDING_CONFIG_KEY` (AES-256-GCM para cifrar credenciais de gravação no
 `wacalls.db` — sem ela, segredos em texto puro + warning), `GOGC` (padrão `200` na
 imagem Docker), `GOMEMLIMIT` (recomendado em produção, ~75% da RAM do container).
+
+### 🪟 Windows Server (binário nativo)
+
+O mesmo código compila para Windows, sem Docker nem WSL.
+
+1. Baixe na [página de Releases](https://github.com/nathanarend/ArendCalls/releases) o
+   `wacalls-server-windows-amd64.exe` (renomeie para `arendcalls.exe`) e o
+   `wacalls-client-<versão>.tar.gz`, ou compile a partir do código:
+   ```bash
+   GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o arendcalls.exe ./cmd/server
+   ```
+2. Monte a pasta `C:\arendcalls` com o binário e o frontend (o `tar` já vem no Windows Server 2019+):
+   ```powershell
+   mkdir C:\arendcalls\client\dist
+   tar -xzf wacalls-client-<versão>.tar.gz -C C:\arendcalls\client\dist
+   ```
+3. Libere o firewall (PowerShell como administrador). A faixa UDP é a mídia WebRTC das chamadas:
+   ```powershell
+   New-NetFirewallRule -DisplayName "ArendCalls HTTP" -Direction Inbound -Protocol TCP -LocalPort 8080 -Action Allow
+   New-NetFirewallRule -DisplayName "ArendCalls WebRTC" -Direction Inbound -Protocol UDP -LocalPort 50000-50100 -Action Allow
+   ```
+4. Instale como serviço com o [NSSM](https://nssm.cc/). O NSSM envia Ctrl+C ao parar o
+   serviço, então o servidor encerra as chamadas e o banco de forma limpa:
+   ```powershell
+   nssm install ArendCalls C:\arendcalls\arendcalls.exe -addr :8080 -static C:\arendcalls\client\dist -db C:\arendcalls\wacalls.db -recordings-dir C:\arendcalls\recordings
+   nssm set ArendCalls AppDirectory C:\arendcalls
+   nssm set ArendCalls AppEnvironmentExtra API_KEY=sua_chave_mestra GOGC=200
+   nssm start ArendCalls
+   ```
+
+Para um teste rápido, basta dar duplo clique no `arendcalls.exe`: ele encontra o
+`client\dist` ao lado do executável e sobe em `http://localhost:8080`.
+
+Para HTTPS, coloque um proxy reverso na frente (IIS com ARR, Caddy ou Traefik). No
+painel de métricas, o *load average* aparece zerado: o Windows não tem essa métrica.
 
 ---
 
