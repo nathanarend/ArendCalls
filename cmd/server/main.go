@@ -10,7 +10,9 @@ import (
 	"net/http/pprof"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"runtime"
+	rtdebug "runtime/debug"
 	"syscall"
 	"time"
 )
@@ -18,7 +20,7 @@ import (
 func main() {
 	addr := flag.String("addr", ":8080", "HTTP listen address")
 	dbPath := flag.String("db", "wacalls.db", "SQLite database path")
-	staticDir := flag.String("static", "", "Directory for static files (e.g. client/dist)")
+	staticDir := flag.String("static", "", "Directory for static files (default: client/dist next to the executable or in the working dir)")
 	debug := flag.Bool("debug", false, "Enable debug logging")
 	maxCalls := flag.Int("max-calls", 0, "Max concurrent calls per session (0 = unlimited)")
 	apiKeyFlag := flag.String("apikey", "", "Global API Key for admin access (overrides API_KEY env var)")
@@ -33,9 +35,23 @@ func main() {
 	}
 	log := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: logLevel}))
 
+	// Sem GOGC no ambiente (duplo clique, serviço Windows), aplica o mesmo
+	// tuning da imagem Docker: o default 100 custa CPU no hot path de áudio.
+	gogc := os.Getenv("GOGC")
+	if gogc == "" {
+		rtdebug.SetGCPercent(200)
+		gogc = "200"
+	}
 	log.Info("runtime",
 		"gomaxprocs", runtime.GOMAXPROCS(0), "numcpu", runtime.NumCPU(),
-		"gogc", cmp.Or(os.Getenv("GOGC"), "100"), "gomemlimit", cmp.Or(os.Getenv("GOMEMLIMIT"), "off"))
+		"gogc", gogc, "gomemlimit", cmp.Or(os.Getenv("GOMEMLIMIT"), "off"))
+
+	*staticDir = resolveStaticDir(*staticDir)
+	if _, err := os.Stat(*staticDir); err == nil {
+		log.Info("serving web panel", "dir", *staticDir)
+	} else {
+		log.Warn("web panel not found — serving API only; use -static to point to client/dist", "static", *staticDir)
+	}
 
 	if *pprofAddr != "" {
 		pmux := http.NewServeMux()
@@ -87,4 +103,23 @@ func main() {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	_ = httpSrv.Shutdown(shutdownCtx)
+}
+
+// resolveStaticDir: sem -static, procura client/dist ao lado do executável
+// (duplo clique, serviço Windows) e depois no diretório atual.
+func resolveStaticDir(flagVal string) string {
+	if flagVal != "" {
+		return flagVal
+	}
+	var candidates []string
+	if exe, err := os.Executable(); err == nil {
+		candidates = append(candidates, filepath.Join(filepath.Dir(exe), "client", "dist"))
+	}
+	candidates = append(candidates, filepath.Join("client", "dist"))
+	for _, dir := range candidates {
+		if fi, err := os.Stat(filepath.Join(dir, "index.html")); err == nil && !fi.IsDir() {
+			return dir
+		}
+	}
+	return ""
 }
