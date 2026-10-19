@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -18,6 +19,7 @@ import (
 
 	"github.com/mdp/qrterminal/v3"
 	"go.mau.fi/whatsmeow"
+	"go.mau.fi/whatsmeow/appstate"
 	waBinary "go.mau.fi/whatsmeow/binary"
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
@@ -36,6 +38,9 @@ type Session struct {
 
 	mu   sync.Mutex
 	auth AuthSnapshot
+
+	lastPulse atomic.Int64 // unix nano do último pulso de presença enviado
+	pulsing   atomic.Bool
 }
 
 func newSession(mgr *SessionManager, id, name, webhookURL string, panelInbound bool, client *whatsmeow.Client) *Session {
@@ -380,19 +385,16 @@ func (s *Session) handleEvent(rawEvt any) {
 			_ = s.mgr.store.setJID(s.mgr.appCtx, s.id, id.String())
 		}
 		s.setAuth(AuthSnapshot{State: "open", Paired: true})
-		// Unavailable já leva o pushname (evita o "-" nos contatos). Não usar
-		// available aqui: o aparelho ficaria "online" direto e o servidor passa
-		// a empurrar chatstate/presence, que disputam a fila de eventos com a
-		// sinalização das chamadas.
-		go func() {
-			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-			defer cancel()
-			if err := s.client.SendPresence(ctx, types.PresenceUnavailable); err != nil {
-				s.log.Warn("failed to send initial presence on connect", "err", err)
-			} else {
-				s.log.Debug("initial presence unavailable sent on connect")
-			}
-		}()
+		go s.refreshPresence(s.mgr.appCtx)
+	case *events.AppStateSyncComplete:
+		// Pareamento novo: o pushname só chega no full sync do critical_block,
+		// depois do Connected, e o full sync não emite PushNameSetting. A
+		// presença do Connected falhou com ErrNoPushName.
+		if evt.Name == appstate.WAPatchCriticalBlock {
+			go s.refreshPresence(s.mgr.appCtx)
+		}
+	case *events.PushNameSetting:
+		go s.refreshPresence(s.mgr.appCtx)
 	case *events.LoggedOut:
 		s.setAuth(AuthSnapshot{State: "logged_out", Paired: false})
 	case *events.CallOffer:
@@ -599,6 +601,61 @@ func (s *Session) SendPresence(ctx context.Context, state types.Presence) error 
 		return fmt.Errorf("session not connected")
 	}
 	return client.SendPresence(ctx, state)
+}
+
+func (s *Session) sendPresenceTimeout(ctx context.Context, state types.Presence) error {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	return s.SendPresence(ctx, state)
+}
+
+// refreshPresence roda no connect e quando o pushname chega. Pulsa se o último
+// pulso foi há mais de presencePulseMinGap; senão só manda unavailable, que já
+// leva o pushname (evita o "-" nos contatos).
+func (s *Session) refreshPresence(ctx context.Context) {
+	if time.Since(time.Unix(0, s.lastPulse.Load())) >= presencePulseMinGap {
+		s.presencePulse(ctx)
+		return
+	}
+	if s.pulsing.Load() {
+		return // o pulso em andamento já termina em unavailable
+	}
+	if err := s.sendPresenceTimeout(ctx, types.PresenceUnavailable); err != nil {
+		s.log.Warn("failed to send presence unavailable", "err", err)
+	}
+}
+
+// presencePulse fica available por presencePulseDuration e volta para
+// unavailable. O available carimba "Ativo" em Dispositivos conectados e segura
+// o logout de 14 dias do companion. Não deixar available direto: o servidor
+// passa a empurrar chatstate/presence, que disputam a fila de eventos com a
+// sinalização das chamadas.
+func (s *Session) presencePulse(ctx context.Context) {
+	if !s.pulsing.CompareAndSwap(false, true) {
+		return
+	}
+	defer s.pulsing.Store(false)
+	if err := s.sendPresenceTimeout(ctx, types.PresenceAvailable); err != nil {
+		// lastPulse fica como está: o próximo connect/pushname tenta de novo.
+		if errors.Is(err, whatsmeow.ErrNoPushName) {
+			s.log.Debug("presence pulse deferred until pushname arrives")
+		} else {
+			s.log.Warn("presence pulse failed", "err", err)
+		}
+		return
+	}
+	s.lastPulse.Store(time.Now().UnixNano())
+	s.log.Info("presence pulse sent")
+	select {
+	case <-ctx.Done():
+		return
+	case <-time.After(presencePulseDuration):
+	}
+	if err := s.sendPresenceTimeout(ctx, types.PresenceUnavailable); err != nil {
+		s.log.Warn("presence pulse: failed to return to unavailable", "err", err)
+	} else {
+		s.log.Debug("presence pulse ended")
+	}
 }
 
 func mapStatus(state core.CallState) CallStatus {

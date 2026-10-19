@@ -180,6 +180,7 @@ func (m *SessionManager) Restore(ctx context.Context) error {
 		client := whatsmeow.NewClient(device, m.waLogger)
 		s := newSession(m, row.ID, row.Name, row.WebhookURL, row.PanelInbound, client)
 		m.register(s)
+		m.log.Info("session restored from database", "session", row.ID, "name", row.Name, "jid", row.JID)
 		if err := s.connect(ctx); err != nil {
 			m.log.Error("session connect failed", "session", row.ID, "err", err)
 		}
@@ -394,6 +395,10 @@ func (m *SessionManager) SessionCounts() (total int, connected int) {
 // do keepalive antes de voltar para unavailable.
 const presencePulseDuration = 30 * time.Second
 
+// presencePulseMinGap evita pulsar em cada reconexão de uma rajada (queda de
+// rede): dentro dele o connect só manda unavailable.
+const presencePulseMinGap = time.Hour
+
 func (m *SessionManager) startPresenceKeepalive() {
 	interval := 24 * time.Hour
 	if durVal := os.Getenv("WA_PRESENCE_INTERVAL"); durVal != "" {
@@ -414,21 +419,13 @@ func (m *SessionManager) startPresenceKeepalive() {
 			case <-m.appCtx.Done():
 				return
 			case <-ticker.C:
-				// Pulso: marca atividade e volta para unavailable, senão a
-				// sessão fica "online" até o próximo reconnect.
-				m.sendPresenceToAll(types.PresenceAvailable)
-				select {
-				case <-m.appCtx.Done():
-					return
-				case <-time.After(presencePulseDuration):
-				}
-				m.sendPresenceToAll(types.PresenceUnavailable)
+				m.pulseAll()
 			}
 		}
 	}()
 }
 
-func (m *SessionManager) sendPresenceToAll(presence types.Presence) {
+func (m *SessionManager) pulseAll() {
 	m.mu.RLock()
 	sessions := make([]*Session, 0, len(m.sessions))
 	for _, s := range m.sessions {
@@ -439,16 +436,9 @@ func (m *SessionManager) sendPresenceToAll(presence types.Presence) {
 	for _, s := range sessions {
 		s.mu.Lock()
 		client := s.client
-		sid := s.id
 		s.mu.Unlock()
 		if client != nil && client.IsConnected() {
-			ctx, cancel := context.WithTimeout(m.appCtx, 10*time.Second)
-			if err := client.SendPresence(ctx, presence); err != nil {
-				m.log.Warn("periodic keepalive presence failed", "session", sid, "err", err)
-			} else {
-				m.log.Info("periodic keepalive presence sent", "session", sid, "presence", string(presence))
-			}
-			cancel()
+			go s.presencePulse(m.appCtx)
 		}
 	}
 }

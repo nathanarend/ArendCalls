@@ -1,11 +1,13 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
 	"log/slog"
+	"path/filepath"
 	"time"
 
 	"go.mau.fi/whatsmeow/store/sqlstore"
@@ -44,6 +46,10 @@ func newServer(ctx context.Context, dbPath, staticDir, apiKey, recDir string, ma
 	if err != nil {
 		return nil, err
 	}
+	// Caminho absoluto: -db é relativo à pasta de trabalho, então um binário
+	// novo na pasta antiga reaproveita o banco antigo sem avisar.
+	absDB, _ := filepath.Abs(dbPath)
+	log.Info("database opened", "path", cmp.Or(absDB, dbPath))
 	container := sqlstore.NewWithDB(db, "sqlite3", waLog.Noop)
 	if err := container.Upgrade(ctx); err != nil {
 		return nil, err
