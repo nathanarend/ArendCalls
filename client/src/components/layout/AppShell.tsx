@@ -18,7 +18,7 @@ export const AppShell = ({ children }: { children: ReactNode }) => {
         <div className="flex items-center gap-2">
           <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
             <SheetTrigger asChild>
-              <Button variant="outline" size="icon" className="md:hidden" aria-label="Accounts">
+              <Button variant="outline" size="icon" className="md:hidden" aria-label="Contas">
                 <Menu className="h-4 w-4" />
               </Button>
             </SheetTrigger>

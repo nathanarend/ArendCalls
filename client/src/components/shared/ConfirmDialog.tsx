@@ -23,7 +23,7 @@ export const ConfirmDialog = ({
   onOpenChange,
   title,
   description,
-  confirmLabel = "Confirm",
+  confirmLabel = "Confirmar",
   destructive,
   onConfirm,
 }: Props) => (
@@ -35,7 +35,7 @@ export const ConfirmDialog = ({
       </DialogHeader>
       <DialogFooter>
         <Button variant="outline" onClick={() => onOpenChange(false)}>
-          Cancel
+          Cancelar
         </Button>
         <Button
           variant={destructive ? "destructive" : "default"}

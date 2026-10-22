@@ -106,7 +106,7 @@ export const IncomingCallModal = () => {
             className="h-14 w-14 rounded-full"
             disabled={busy}
             onClick={() => incoming && reject.mutate({ sid: incoming.sessionId, callId: incoming.callId })}
-            aria-label="Reject"
+            aria-label="Recusar"
           >
             <PhoneOff className="h-6 w-6" />
           </Button>
@@ -115,7 +115,7 @@ export const IncomingCallModal = () => {
             className="h-14 w-14 rounded-full"
             disabled={busy}
             onClick={() => incoming && accept.mutate({ sid: incoming.sessionId, callId: incoming.callId })}
-            aria-label="Accept"
+            aria-label="Atender"
           >
             <Phone className="h-6 w-6" />
           </Button>
