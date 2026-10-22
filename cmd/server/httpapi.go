@@ -58,6 +58,13 @@ func (s *server) routes() http.Handler {
 
 	mux.HandleFunc("GET /api/sessions/{sid}/events", s.handleSessionEvents)
 
+	mux.HandleFunc("GET /api/migration/status", s.handleMigrationStatus)
+	mux.HandleFunc("POST /api/migration/import", s.handleMigrationImport)
+	mux.HandleFunc("POST /api/migration/source/lock", s.handleMigrationLock)
+	mux.HandleFunc("GET /api/migration/source/{mid}/files/{name}", s.handleMigrationFile)
+	mux.HandleFunc("POST /api/migration/source/{mid}/commit", s.handleMigrationCommit)
+	mux.HandleFunc("POST /api/migration/source/{mid}/abort", s.handleMigrationAbort)
+
 	if s.staticDir != "" {
 		if _, err := os.Stat(s.staticDir); err == nil {
 			fs := http.FileServer(http.Dir(s.staticDir))
@@ -77,7 +84,11 @@ func (s *server) routes() http.Handler {
 			})
 		}
 	}
-	return withCORS(s.withAuth(mux))
+	var h http.Handler = mux
+	if s.mig != nil {
+		h = s.mig.guard(mux)
+	}
+	return withCORS(s.withAuth(h))
 }
 
 func (s *server) withAuth(h http.Handler) http.Handler {

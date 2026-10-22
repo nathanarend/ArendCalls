@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"wacalls/internal/voip/recording"
@@ -54,6 +55,11 @@ type recordingController struct {
 	inflight  map[string]bool // callIDs queued or being processed — upload dedupe
 	jobs      chan string
 	startOnce sync.Once
+
+	// paused: migração. Jobs que chegam são descartados (a linha segue pendente
+	// no banco); busy conta o upload em curso para pause esperar ele acabar.
+	paused atomic.Bool
+	busy   atomic.Int32
 }
 
 func newRecordingController(ctx context.Context, store *recordingStore, secrets *secretBox, dir string, workers int, log *slog.Logger) *recordingController {
@@ -253,12 +259,43 @@ func (c *recordingController) worker() {
 		case <-c.appCtx.Done():
 			return
 		case callID := <-c.jobs:
-			c.processRecording(callID)
+			// busy antes de olhar paused: pause vê o upload que já passou do teste.
+			c.busy.Add(1)
+			if !c.paused.Load() {
+				c.processRecording(callID)
+			}
+			c.busy.Add(-1)
 			c.mu.Lock()
 			delete(c.inflight, callID)
 			c.mu.Unlock()
 		}
 	}
+}
+
+// liveCount: chamadas armadas ou gravando agora.
+func (c *recordingController) liveCount() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return len(c.live)
+}
+
+// pause para o handoff e espera o upload em curso terminar (ou ctx expirar).
+func (c *recordingController) pause(ctx context.Context) error {
+	c.paused.Store(true)
+	for c.busy.Load() > 0 {
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("upload de gravação em andamento: %w", ctx.Err())
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
+	return nil
+}
+
+// resume religa o handoff e re-enfileira o que estiver pendente no banco.
+func (c *recordingController) resume() {
+	c.paused.Store(false)
+	go c.resumeOnBoot()
 }
 
 func (c *recordingController) pathFor(meta recMeta) string {

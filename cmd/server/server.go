@@ -16,6 +16,7 @@ import (
 )
 
 type server struct {
+	db         *sql.DB
 	dbPath     string
 	staticDir  string
 	adminToken string
@@ -29,6 +30,7 @@ type server struct {
 	broker    *Broker
 	recStore  *recordingStore
 	rec       *recordingController
+	mig       *migrator
 	tickets   *audioTickets
 	prebuffer audioPrebuffer
 	startTime time.Time
@@ -65,6 +67,9 @@ func newServer(ctx context.Context, dbPath, staticDir, apiKey, recDir string, ma
 	if err != nil {
 		return nil, err
 	}
+	if err := ensureMigrationTable(ctx, db); err != nil {
+		return nil, err
+	}
 
 	waLogger := waLog.Noop
 	if log.Enabled(ctx, slog.LevelDebug) {
@@ -85,7 +90,8 @@ func newServer(ctx context.Context, dbPath, staticDir, apiKey, recDir string, ma
 	rand.Read(tokenBytes)
 	adminToken := hex.EncodeToString(tokenBytes)
 
-	return &server{
+	s := &server{
+		db:         db,
 		dbPath:     dbPath,
 		staticDir:  staticDir,
 		adminToken: adminToken,
@@ -101,5 +107,7 @@ func newServer(ctx context.Context, dbPath, staticDir, apiKey, recDir string, ma
 		tickets:    newAudioTickets(),
 		prebuffer:  prebufferFromEnv(log),
 		startTime:  time.Now(),
-	}, nil
+	}
+	s.mig = newMigrator(s)
+	return s, nil
 }

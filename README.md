@@ -12,7 +12,7 @@
 [![pion](https://img.shields.io/badge/pion-WebRTC-FF6B6B)](https://github.com/pion/webrtc)
 [![Licença](https://img.shields.io/badge/licen%C3%A7a-MIT-green.svg)](#licenca)
 
-[Diferenciais](#diferenciais) · [Início Rápido (Docker)](#inicio-rapido) · [Como Funciona](#como-funciona) · [Arquitetura](#arquitetura) · [Rotas da API](#endpoints) · [Gravação](#gravacao) · [Autenticação](#seguranca)
+[Diferenciais](#diferenciais) · [Início Rápido (Docker)](#inicio-rapido) · [Como Funciona](#como-funciona) · [Arquitetura](#arquitetura) · [Rotas da API](#endpoints) · [Gravação](#gravacao) · [Migração](#migracao) · [Autenticação](#seguranca)
 
 </div>
 
@@ -56,6 +56,7 @@ Este repositório (`ArendCalls`) traz diversas melhorias de engenharia e usabili
 | ⚡ **Codec MLow Otimizado** | Encode ~2,7× mais rápido (memoização de twiddles do FFT, pool de scratch da busca CELP) — saída de áudio byte a byte idêntica, mais chamadas simultâneas por VPS. |
 | 🛡️ **Autenticação Unificada** | Chave mestra global (`API_KEY`) para as integrações de backend e login com senha (hash bcrypt, bloqueio por tentativas) para o painel web. |
 | 🏢 **Gerenciador Visual de Instâncias** | Criar, renomear e gerenciar múltiplas conexões de WhatsApp diretamente pela barra lateral. |
+| 🚚 **Migração entre Servidores** | Clone completo do banco de um servidor para outro pelo painel (contas sem novo QR, webhooks, gravações pendentes), com bloqueio da origem e confirmação em duas fases — as mesmas chaves nunca rodam em dois lugares. |
 | 💾 **Persistência Inteligente** | Contas deslogadas são mantidas salvas no banco de dados SQLite (`logged_out`), preservando IDs e webhooks. |
 | 📊 **Telemetria da VPS sob Demanda** | Modal com RAM, CPU, uptime, goroutines, disco e chamadas ativas — polling só enquanto aberto, zero overhead em background. |
 | 📖 **Guia da API Integrado** | Documentação interativa embutida na própria interface com exemplos de cURL, Webhooks e Server-Sent Events (SSE). |
@@ -325,6 +326,16 @@ Todas as rotas de API exigem autenticação (ver [Segurança](#seguranca)).
 | `GET` | `/api/events` | Stream global de eventos em tempo real (SSE) |
 | `GET` | `/api/sessions/{sid}/events` | Stream de eventos de uma sessão específica (SSE) |
 
+### Migração entre Servidores
+
+| Método | Rota | Finalidade |
+|---|---|---|
+| `GET` | `/api/migration/status` | Estado da migração nesta instância (papel, fase, progresso, registro) |
+| `POST` | `/api/migration/import` | **No destino:** puxa o clone da origem — `{ sourceUrl, sourceApiKey, allowInsecure? }` |
+| `POST` | `/api/migration/source/lock` | **Na origem** (chamada pelo destino): desconecta tudo e gera o snapshot |
+| `GET` | `/api/migration/source/{mid}/files/{name}` | **Na origem:** download do snapshot / WAVs (aceita `Range`) |
+| `POST` | `/api/migration/source/{mid}/commit` · `/abort` | **Na origem:** confirmar (apaga as chaves locais) ou desbloquear |
+
 ---
 
 <a id="gravacao"></a>
@@ -474,6 +485,30 @@ próxima ligação. Se ouvir picote no começo das falas, aumente; se a conversa
   **Basic Auth no proxy** (ex.: Traefik), a rota `/api/sessions/*/calls/*/audio`
   precisa ficar fora dele para clientes de outra origem; o ticket é a autenticação.
   O painel não é afetado (mesma origem, o cookie vai no handshake).
+
+---
+
+<a id="migracao"></a>
+## 🚚 Migração entre Servidores
+
+Move tudo de um servidor ArendCalls (**origem**) para outro (**destino**): contas com as chaves do WhatsApp (sem escanear QR de novo), nomes, IDs, webhooks, configuração de gravação e WAVs ainda não entregues ao B2. No painel do **destino**, clique em ⇄ (barra lateral) e informe a URL e a `API_KEY` da origem.
+
+O protocolo garante que as mesmas chaves nunca ficam ativas nos dois lados:
+
+1. **Bloqueio** — a origem encerra as conexões (sem logout, o aparelho continua vinculado), pausa as gravações e gera um snapshot consistente (`VACUUM INTO`). O bloqueio é persistido: a origem continua parada mesmo se reiniciar.
+2. **Download conferido** — banco e WAVs com sha256 e tamanho exatos; downloads interrompidos retomam via `Range`.
+3. **Verificação** — `integrity_check`, `foreign_key_check`, contagem de linhas igual à da origem e schema atualizado para a versão do destino.
+4. **Import atômico** — uma transação troca todas as tabelas e confere cada uma (linhas + sha256 do conteúdo) antes do commit. Antes disso, o destino guarda um backup de si mesmo.
+5. **Conexão** — o destino conecta as contas. Se **nenhuma** conectar em 90 s, ele volta ao backup e só então desbloqueia a origem.
+6. **Confirmação** — o destino avisa a origem, que apaga as próprias chaves e fica desativada (banner no painel, rotas de escrita respondem `423`). Sem resposta, o destino repete até conseguir; até lá a origem segue bloqueada.
+
+Requisitos e observações:
+
+- O destino precisa estar **vazio** (sem contas pareadas) e na **mesma versão** da origem ou mais nova. Nenhuma chamada pode estar em andamento na origem.
+- Use **https**: o snapshot carrega as chaves das contas. `http` só com `allowInsecure` (rede privada/VPN).
+- Variáveis de ambiente **não** migram (`API_KEY`, `ADMIN_PASSWORD_HASH`, `RECORDING_CONFIG_KEY`). Os segredos de gravação são re-cifrados com a `RECORDING_CONFIG_KEY` do destino.
+- Se o destino não conseguir falar com a origem no fim, o painel da origem oferece **Desbloquear** (o destino não usou as chaves) e **Finalizar manualmente** (o destino está operando). Cada botão explica quando é seguro usá-lo.
+- Uma conta que aparecer como **"Em uso em outro servidor"** recebeu `stream replaced`: outro processo conectou com as mesmas chaves. Ela não reconecta sozinha; mantenha só uma instância ativa.
 
 ---
 

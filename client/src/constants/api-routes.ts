@@ -14,6 +14,14 @@ export const adminRoutes: RouteInfo[] = [
   { method: "GET", path: "/api/panel-settings", purpose: "Ler o switch global 'o painel mostra chamadas recebidas'", response: { inboundCalls: true } },
   { method: "PATCH", path: "/api/panel-settings", purpose: "Ligar/desligar globalmente a exibição de chamadas recebidas no painel. Uma conta com override ligado ainda aparece (OU lógico).", payload: { inboundCalls: false }, response: { status: "ok", inboundCalls: false } },
   { method: "GET", path: "/api/events", purpose: "Eventos Server-Sent globais e disparo de Webhooks em paralelo" },
+  { method: "GET", path: "/api/migration/status", purpose: "Estado da migração entre servidores nesta instância (papel source/target, fase, progresso, registro)" },
+  {
+    method: "POST",
+    path: "/api/migration/import",
+    purpose: "No DESTINO: clona o banco inteiro de outra instância (contas com chaves, webhooks, gravações pendentes). O destino precisa estar sem contas pareadas. A origem é bloqueada, conferida e só apaga as chaves dela depois que o destino confirma.",
+    payload: { sourceUrl: "https://calls.servidor-antigo.com", sourceApiKey: "API_KEY_DA_ORIGEM", allowInsecure: false },
+    response: { migrationId: "5d86cc6c..." },
+  },
 ];
 
 export const sessionRoutes: RouteInfo[] = [

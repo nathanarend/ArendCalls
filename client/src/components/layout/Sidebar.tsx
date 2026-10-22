@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Plus, Trash2, Pencil, BookOpen, Settings, Activity, PhoneIncoming } from "lucide-react";
+import { Plus, Trash2, Pencil, BookOpen, Settings, Activity, PhoneIncoming, ArrowLeftRight } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -13,6 +13,7 @@ import { EditSessionModal } from "@/components/domain/session/EditSessionModal";
 import { SessionSettingsModal } from "@/components/domain/session/SessionSettingsModal";
 import { SystemMetricsModal } from "@/components/domain/system/SystemMetricsModal";
 import { PanelSettingsModal } from "@/components/domain/system/PanelSettingsModal";
+import { openMigrationModal } from "@/stores/migration";
 
 const dotClass: Record<SessionState, string> = {
   open: "bg-emerald-500",
@@ -20,6 +21,7 @@ const dotClass: Record<SessionState, string> = {
   stopped: "bg-zinc-400 dark:bg-zinc-500",
   connecting: "bg-blue-500",
   logged_out: "bg-rose-500",
+  replaced: "bg-rose-500",
 };
 
 export const Sidebar = ({ onNavigate }: { onNavigate?: () => void }) => {
@@ -58,6 +60,14 @@ export const Sidebar = ({ onNavigate }: { onNavigate?: () => void }) => {
             aria-label="Configurações do Painel"
           >
             <PhoneIncoming className="h-4 w-4" />
+          </button>
+          <button
+            onClick={() => openMigrationModal()}
+            className="text-muted-foreground hover:text-foreground transition-colors p-1"
+            title="Migrar de outra instância"
+            aria-label="Migrar de outra instância"
+          >
+            <ArrowLeftRight className="h-4 w-4" />
           </button>
           <button
             onClick={() => setShowMetricsDialog(true)}

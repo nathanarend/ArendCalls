@@ -12,6 +12,7 @@ const statusLabel: Record<SessionState, string> = {
   stopped: "Parado",
   connecting: "Conectando…",
   logged_out: "Desconectado",
+  replaced: "Em uso em outro servidor",
 };
 
 const statusVariant: Record<SessionState, "success" | "secondary" | "muted" | "destructive"> = {
@@ -20,6 +21,7 @@ const statusVariant: Record<SessionState, "success" | "secondary" | "muted" | "d
   stopped: "muted",
   connecting: "secondary",
   logged_out: "destructive",
+  replaced: "destructive",
 };
 
 export const SessionHeader = ({ session }: { session: SessionInfo }) => {

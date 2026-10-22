@@ -5,6 +5,8 @@ import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/s
 import { Sidebar } from "./Sidebar";
 import { ThemeToggle } from "./ThemeToggle";
 import { logout, useAuth } from "@/stores/auth";
+import { MigrationBanner } from "@/components/domain/system/MigrationBanner";
+import { MigrationModal } from "@/components/domain/system/MigrationModal";
 
 export const AppShell = ({ children }: { children: ReactNode }) => {
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -39,12 +41,14 @@ export const AppShell = ({ children }: { children: ReactNode }) => {
           )}
         </div>
       </header>
+      <MigrationBanner />
       <div className="flex flex-1">
         <aside className="hidden w-80 shrink-0 border-r md:block">
           <Sidebar />
         </aside>
         <main className="flex-1 px-4 py-6 sm:px-6">{children}</main>
       </div>
+      <MigrationModal />
     </div>
   );
 };

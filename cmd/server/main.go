@@ -110,12 +110,19 @@ func main() {
 	defer srv.sessions.disconnectAll()
 	log.Info("audio prebuffer", "webrtc_ms", srv.prebuffer.WebRTC, "websocket_ms", srv.prebuffer.WebSocket)
 
+	// Antes de gravação e contas: com bloqueio de migração nada conecta.
+	if err := srv.mig.boot(ctx); err != nil {
+		log.Error("migration state load failed", "err", err)
+		os.Exit(1)
+	}
+
 	srv.rec.start()
 
 	if err := srv.sessions.Restore(ctx); err != nil {
 		log.Error("session restore failed", "err", err)
 		os.Exit(1)
 	}
+	srv.mig.resumeJobs(ctx)
 
 	httpSrv := &http.Server{Addr: *addr, Handler: srv.routes()}
 	go func() {

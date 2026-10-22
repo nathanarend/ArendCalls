@@ -114,6 +114,9 @@ func (c *recordingController) retryLoop() {
 }
 
 func (c *recordingController) retrySweep() {
+	if c.paused.Load() {
+		return
+	}
 	rows, err := c.store.pendingHandoff(c.appCtx)
 	if err != nil {
 		c.log.Warn("recording retry: sweep query failed", "err", err)

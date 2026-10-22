@@ -10,6 +10,7 @@ import { IncomingCallModal } from "@/components/domain/call/IncomingCallModal";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { ensureSessionsWired, useSessions } from "@/stores/sessions";
 import { ensureCallsWired } from "@/stores/calls";
+import { ensureMigrationPolling } from "@/stores/migration";
 import { useTheme } from "@/stores/theme";
 import { ApiDocs } from "@/components/domain/api/ApiDocs";
 import { LoginPage } from "@/components/domain/auth/LoginPage";
@@ -42,6 +43,7 @@ const Panel = () => {
   useEffect(() => {
     ensureSessionsWired();
     ensureCallsWired();
+    ensureMigrationPolling();
   }, []);
 
   const active = sessions.find((s) => s.id === activeId) ?? null;

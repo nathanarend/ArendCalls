@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -31,7 +32,12 @@ type SessionManager struct {
 	sessions         map[string]*Session
 	order            []string
 	panelInboundCall atomic.Bool // global switch: panel shows incoming calls
+
+	// blocked: migração exige tudo parado. Nenhuma conta conecta nem pareia.
+	blocked atomic.Bool
 }
+
+var errMigrationBlocked = errors.New("instância bloqueada por migração")
 
 func newSessionManager(ctx context.Context, container *sqlstore.Container, broker *Broker, store *sessionStore, waLogger waLog.Logger, log *slog.Logger, maxCalls int) *SessionManager {
 	m := &SessionManager{
@@ -181,6 +187,10 @@ func (m *SessionManager) Restore(ctx context.Context) error {
 		s := newSession(m, row.ID, row.Name, row.WebhookURL, row.PanelInbound, client)
 		m.register(s)
 		m.log.Info("session restored from database", "session", row.ID, "name", row.Name, "jid", row.JID)
+		if m.blocked.Load() {
+			s.auth = AuthSnapshot{State: "stopped", Paired: true}
+			continue
+		}
 		if err := s.connect(ctx); err != nil {
 			m.log.Error("session connect failed", "session", row.ID, "err", err)
 		}
@@ -191,6 +201,9 @@ func (m *SessionManager) Restore(ctx context.Context) error {
 }
 
 func (m *SessionManager) Create(name string) (string, error) {
+	if m.blocked.Load() {
+		return "", errMigrationBlocked
+	}
 	id := newSessionID()
 	if err := m.store.insert(m.appCtx, id, name); err != nil {
 		return "", err
@@ -295,6 +308,9 @@ func (m *SessionManager) Start(ctx context.Context, id string) error {
 	if !ok {
 		return fmt.Errorf("no session %s", id)
 	}
+	if m.blocked.Load() {
+		return errMigrationBlocked
+	}
 	if s.client.IsConnected() {
 		return nil
 	}
@@ -313,6 +329,9 @@ func (m *SessionManager) Pair(id string) error {
 	s, ok := m.Get(id)
 	if !ok {
 		return fmt.Errorf("no session %s", id)
+	}
+	if m.blocked.Load() {
+		return errMigrationBlocked
 	}
 	if s.client.Store.ID != nil {
 		return fmt.Errorf("session already paired")
@@ -336,6 +355,104 @@ func (m *SessionManager) disconnectAll() {
 	for _, s := range all {
 		s.shutdown()
 	}
+}
+
+func (m *SessionManager) all() []*Session {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := make([]*Session, 0, len(m.order))
+	for _, id := range m.order {
+		if s, ok := m.sessions[id]; ok {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+func (m *SessionManager) activeCallCount() int {
+	n := 0
+	for _, s := range m.all() {
+		n += s.reg.count()
+	}
+	return n
+}
+
+func (m *SessionManager) pairedCount() int {
+	n := 0
+	for _, s := range m.all() {
+		if s.currentClient().Store.ID != nil {
+			n++
+		}
+	}
+	return n
+}
+
+// stopForMigration derruba todas as conexões sem logout. Auto-reconnect
+// desligado para nenhum reconnect em voo religar a conta depois do Disconnect.
+func (m *SessionManager) stopForMigration() {
+	for _, s := range m.all() {
+		c := s.currentClient()
+		c.EnableAutoReconnect = false
+		s.shutdown()
+		s.setAuth(AuthSnapshot{State: "stopped", Paired: c.Store.ID != nil})
+	}
+}
+
+// connectedCount: contas pareadas conectadas agora e as que conectaram em algum
+// momento desde o registro (connectedOnce).
+func (m *SessionManager) connectedCount() (now, ever, paired int, missing []string) {
+	for _, s := range m.all() {
+		c := s.currentClient()
+		if c.Store.ID == nil {
+			continue
+		}
+		paired++
+		if c.IsConnected() && c.IsLoggedIn() {
+			now++
+		}
+		if s.connectedOnce.Load() {
+			ever++
+		} else {
+			missing = append(missing, s.name)
+		}
+	}
+	return now, ever, paired, missing
+}
+
+// reconnectAll religa as contas pareadas (fim do bloqueio de migração).
+func (m *SessionManager) reconnectAll() {
+	for _, s := range m.all() {
+		c := s.currentClient()
+		if c.Store.ID == nil {
+			continue
+		}
+		c.EnableAutoReconnect = true
+		s.setAuth(AuthSnapshot{State: "connecting", Paired: true})
+		if err := c.Connect(); err != nil {
+			m.log.Error("session reconnect failed", "session", s.id, "err", err)
+		}
+	}
+}
+
+// dropAll derruba e esquece todas as sessões em memória (o banco fica como está).
+func (m *SessionManager) dropAll() {
+	for _, s := range m.all() {
+		s.currentClient().EnableAutoReconnect = false
+		s.shutdown()
+	}
+	m.mu.Lock()
+	m.sessions = map[string]*Session{}
+	m.order = nil
+	m.mu.Unlock()
+}
+
+// reload troca o container (cache de LID novo) e recarrega as sessões do banco.
+func (m *SessionManager) reload(ctx context.Context, container *sqlstore.Container) error {
+	m.dropAll()
+	m.mu.Lock()
+	m.container = container
+	m.mu.Unlock()
+	return m.Restore(ctx)
 }
 
 func (m *SessionManager) SetWebhookURL(ctx context.Context, id, webhookURL string) error {
