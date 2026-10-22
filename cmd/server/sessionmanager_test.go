@@ -78,3 +78,32 @@ func TestSessionManagerRegistry(t *testing.T) {
 		t.Fatal("expected 1 session after unregister")
 	}
 }
+
+// Conta nova: o que fica em memória tem que bater com o que o banco devolve
+// depois de um restart (ou de uma migração).
+func TestCreateSessionMatchesStoredDefaults(t *testing.T) {
+	m := newTestManager(t)
+	id, err := m.Create("Nova")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(m.disconnectAll)
+
+	s, ok := m.Get(id)
+	if !ok {
+		t.Fatal("sessão criada não registrada")
+	}
+	rows, err := m.store.list(m.appCtx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 || rows[0].ID != id {
+		t.Fatalf("banco: %+v", rows)
+	}
+	if got := s.info().PanelInbound; got != rows[0].PanelInbound {
+		t.Fatalf("panelInbound em memória %v, no banco %v", got, rows[0].PanelInbound)
+	}
+	if rows[0].PanelInbound {
+		t.Fatal("override de chamadas recebidas deveria nascer desligado")
+	}
+}

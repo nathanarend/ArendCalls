@@ -11,9 +11,20 @@ import (
 	"go.mau.fi/whatsmeow/types"
 )
 
+// browserLeg é a perna navegador ↔ servidor de uma chamada: WebRTC
+// (DataChannel, Bridge) ou WebSocket (WSBridge). O núcleo da chamada só vê PCM
+// float32.
+type browserLeg interface {
+	WritePCM(pcm []float32) error
+	// Detach desliga os callbacks de queda antes do Close, para a troca de
+	// perna (unhold, reconexão) não disparar o encerramento da chamada.
+	Detach()
+	Close()
+}
+
 type activeCall struct {
 	cm     *call.CallManager
-	bridge *Bridge
+	bridge browserLeg
 	// rec is the live call recorder, set once the call is answered when it is
 	// armed for recording. Loaded lock-free on the audio hot path.
 	rec atomic.Pointer[recording.Recorder]
@@ -22,8 +33,8 @@ type activeCall struct {
 	recTried atomic.Bool
 	// stopRinging para o timer anti-zumbi da chamada (ver wireCall).
 	stopRinging func()
-	// bridgeSendErrors: falhas de Bridge.WritePCM (DataChannel → navegador).
-	// Fica na chamada, não no Bridge, porque o Bridge é trocado na reconexão.
+	// bridgeSendErrors: falhas de WritePCM da perna (servidor → navegador).
+	// Fica na chamada, não na perna, porque a perna é trocada na reconexão.
 	bridgeSendErrors atomic.Int64
 }
 
@@ -106,7 +117,18 @@ func (r *callRegistry) count() int {
 	return len(r.calls)
 }
 
-func (r *callRegistry) setBridge(callID string, b *Bridge) (*Bridge, bool) {
+// bridgeOf devolve a perna atual da chamada. ok=false: a chamada já saiu.
+func (r *callRegistry) bridgeOf(callID string) (browserLeg, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	ac, ok := r.calls[callID]
+	if !ok {
+		return nil, false
+	}
+	return ac.bridge, true
+}
+
+func (r *callRegistry) setBridge(callID string, b browserLeg) (browserLeg, bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	ac, ok := r.calls[callID]

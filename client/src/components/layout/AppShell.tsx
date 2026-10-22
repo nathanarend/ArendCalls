@@ -1,12 +1,16 @@
 import { useState, type ReactNode } from "react";
-import { Menu, PhoneCall } from "lucide-react";
+import { LogOut, Menu, PhoneCall } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { Sidebar } from "./Sidebar";
 import { ThemeToggle } from "./ThemeToggle";
+import { logout, useAuth } from "@/stores/auth";
+import { MigrationBanner } from "@/components/domain/system/MigrationBanner";
+import { MigrationModal } from "@/components/domain/system/MigrationModal";
 
 export const AppShell = ({ children }: { children: ReactNode }) => {
   const [mobileOpen, setMobileOpen] = useState(false);
+  const authRequired = useAuth((s) => s.authRequired);
 
   return (
     <div className="flex min-h-screen flex-col">
@@ -14,7 +18,7 @@ export const AppShell = ({ children }: { children: ReactNode }) => {
         <div className="flex items-center gap-2">
           <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
             <SheetTrigger asChild>
-              <Button variant="outline" size="icon" className="md:hidden" aria-label="Accounts">
+              <Button variant="outline" size="icon" className="md:hidden" aria-label="Contas">
                 <Menu className="h-4 w-4" />
               </Button>
             </SheetTrigger>
@@ -30,14 +34,21 @@ export const AppShell = ({ children }: { children: ReactNode }) => {
         </div>
         <div className="flex items-center gap-1.5">
           <ThemeToggle />
+          {authRequired && (
+            <Button variant="outline" size="icon" onClick={() => void logout()} aria-label="Sair" title="Sair">
+              <LogOut className="h-4 w-4" />
+            </Button>
+          )}
         </div>
       </header>
+      <MigrationBanner />
       <div className="flex flex-1">
         <aside className="hidden w-80 shrink-0 border-r md:block">
           <Sidebar />
         </aside>
         <main className="flex-1 px-4 py-6 sm:px-6">{children}</main>
       </div>
+      <MigrationModal />
     </div>
   );
 };

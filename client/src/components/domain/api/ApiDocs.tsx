@@ -224,6 +224,32 @@ export const ApiDocs = () => {
         </div>
 
         <div className="mt-8 space-y-4 pt-6 border-t">
+          <h2 className="text-xl font-semibold">Transporte de Áudio: WebRTC ou WebSocket</h2>
+          <p className="text-sm text-muted-foreground">
+            O áudio entre navegador e servidor é sempre o mesmo PCM <strong>Int16 LE, 16 kHz, mono</strong>, e o cliente escolhe o
+            transporte ao conectar. Os dois ficam disponíveis o tempo todo; nada no resto da API muda.
+          </p>
+          <ul className="list-disc pl-5 text-sm text-muted-foreground space-y-2">
+            <li><strong>WebRTC</strong> (<code>POST .../webrtc</code>): DataChannel <code>pcm</code>. Exige UDP direto até o servidor (portas 50000-50100). Use com IP público.</li>
+            <li>
+              <strong>WebSocket</strong> (<code>GET .../audio</code>): uma mensagem binária por quadro, nos dois sentidos. Funciona atrás de proxy ou
+              Cloudflare Tunnel. Como é TCP, perda de pacote vira atraso pontual em vez de picote.
+            </li>
+            <li>
+              De outra origem (seu CRM), o navegador não pode mandar <code>Authorization</code> no WebSocket: o seu backend pede
+              <code> POST .../audio-ticket</code> com a API key e o navegador conecta em <code>wss://.../audio?ticket=...</code>. O ticket vale
+              30 s, uma vez, só para aquela chamada. Com Basic Auth no proxy, deixe a rota <code>/api/sessions/*/calls/*/audio</code> fora dele.
+            </li>
+            <li>
+              Fechamento pelo servidor: <code>1000 call_ended</code> (a chamada terminou) ou <code>1000 replaced</code> (outra conexão de áudio
+              assumiu, ex.: retomada após espera). Outra queda é anormal: o servidor espera <strong>15 s</strong> por uma reconexão (com ticket
+              novo) antes de encerrar a chamada; em espera, não encerra. Ping a cada 20 s.
+            </li>
+            <li>No painel, a escolha fica em <strong>Configurações do Painel → Transporte de áudio</strong> (por navegador, padrão WebRTC).</li>
+          </ul>
+        </div>
+
+        <div className="mt-8 space-y-4 pt-6 border-t">
           <h2 className="text-xl font-semibold">Segurança e Autenticação</h2>
           <p className="text-sm text-muted-foreground">
             A API utiliza autenticação por Chave de Super-Usuário (Global). Quando o servidor está atrás de um proxy reverso (como Traefik) com proteção de <strong>Basic Auth</strong>, é necessário enviar as credenciais do Traefik no cabeçalho <code>Authorization: Basic ...</code> ou flag <code>-u usuario:senha</code> e passar a chave do ArendCalls via <code>?apikey=...</code> ou cabeçalho <code>X-Api-Key: ...</code>.

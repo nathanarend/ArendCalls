@@ -19,6 +19,10 @@ import (
 func (s *server) routes() http.Handler {
 	mux := http.NewServeMux()
 
+	mux.HandleFunc("GET /api/auth/status", s.handleAuthStatus)
+	mux.HandleFunc("POST /api/auth/login", s.handleAuthLogin)
+	mux.HandleFunc("POST /api/auth/logout", s.handleAuthLogout)
+
 	mux.HandleFunc("GET /api/sessions", s.handleSessionList)
 	mux.HandleFunc("POST /api/sessions", s.handleSessionCreate)
 	mux.HandleFunc("PATCH /api/sessions/{sid}", s.handleSessionRename)
@@ -35,6 +39,8 @@ func (s *server) routes() http.Handler {
 	mux.HandleFunc("POST /api/sessions/{sid}/presence", s.handleSessionPresence)
 	mux.HandleFunc("POST /api/sessions/{sid}/calls", s.handleStartCall)
 	mux.HandleFunc("POST /api/sessions/{sid}/calls/{id}/webrtc", s.handleWebRTC)
+	mux.HandleFunc("POST /api/sessions/{sid}/calls/{id}/audio-ticket", s.handleAudioTicket)
+	mux.HandleFunc("GET /api/sessions/{sid}/calls/{id}/audio", s.handleAudioWS)
 	mux.HandleFunc("POST /api/sessions/{sid}/calls/{id}/accept", s.handleAccept)
 	mux.HandleFunc("POST /api/sessions/{sid}/calls/{id}/reject", s.handleReject)
 	mux.HandleFunc("POST /api/sessions/{sid}/calls/{id}/hold", s.handleHold)
@@ -52,11 +58,20 @@ func (s *server) routes() http.Handler {
 
 	mux.HandleFunc("GET /api/sessions/{sid}/events", s.handleSessionEvents)
 
+	mux.HandleFunc("GET /api/migration/status", s.handleMigrationStatus)
+	mux.HandleFunc("POST /api/migration/import", s.handleMigrationImport)
+	mux.HandleFunc("POST /api/migration/source/lock", s.handleMigrationLock)
+	mux.HandleFunc("GET /api/migration/source/{mid}/files/{name}", s.handleMigrationFile)
+	mux.HandleFunc("POST /api/migration/source/{mid}/commit", s.handleMigrationCommit)
+	mux.HandleFunc("POST /api/migration/source/{mid}/abort", s.handleMigrationAbort)
+
 	if s.staticDir != "" {
 		if _, err := os.Stat(s.staticDir); err == nil {
 			fs := http.FileServer(http.Dir(s.staticDir))
 			mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-				if r.URL.Path == "/" {
+				// Só no modo sem login: com ADMIN_PASSWORD_HASH, o cookie
+				// vem de POST /api/auth/login.
+				if r.URL.Path == "/" && s.panel == nil {
 					http.SetCookie(w, &http.Cookie{
 						Name:     "wacalls_admin_token",
 						Value:    s.adminToken,
@@ -69,42 +84,56 @@ func (s *server) routes() http.Handler {
 			})
 		}
 	}
-	return withCORS(s.withAuth(mux))
+	var h http.Handler = mux
+	if s.mig != nil {
+		h = s.mig.guard(mux)
+	}
+	return withCORS(s.withAuth(h))
 }
 
 func (s *server) withAuth(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !strings.HasPrefix(r.URL.Path, "/api/") {
+		if !strings.HasPrefix(r.URL.Path, "/api/") || strings.HasPrefix(r.URL.Path, "/api/auth/") {
 			h.ServeHTTP(w, r)
 			return
 		}
 
-		// 1. Web Panel Admin Cookie
-		if cookie, err := r.Cookie("wacalls_admin_token"); err == nil && cookie.Value == s.adminToken {
+		// WebSocket de áudio com ticket: quem valida o ticket é o handler
+		// (handleAudioWS). Nenhuma outra rota aceita ticket.
+		if r.Method == http.MethodGet && r.URL.Query().Has("ticket") && isAudioWSPath(r.URL.Path) {
 			h.ServeHTTP(w, r)
 			return
 		}
 
-		// Extract Authorization header, X-Api-Key header or query param
-		auth := r.Header.Get("X-Api-Key")
-		if auth == "" {
-			authHeader := r.Header.Get("Authorization")
-			if strings.HasPrefix(authHeader, "Bearer ") {
-				auth = strings.TrimPrefix(authHeader, "Bearer ")
-			}
-		}
-		if auth == "" {
-			auth = r.URL.Query().Get("apikey")
+		// 1. Web Panel Cookie (sessão de login ou cookie automático)
+		if s.panelCookieOK(r) {
+			h.ServeHTTP(w, r)
+			return
 		}
 
 		// 2. Global Super-User API Key
-		if s.apiKey != "" && auth == s.apiKey {
+		if s.apiKeyOK(r) {
 			h.ServeHTTP(w, r)
 			return
 		}
 
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized or invalid api key / admin cookie"})
 	})
+}
+
+// apiKeyOK: API key global no X-Api-Key, no Authorization Bearer ou em ?apikey=.
+func (s *server) apiKeyOK(r *http.Request) bool {
+	auth := r.Header.Get("X-Api-Key")
+	if auth == "" {
+		authHeader := r.Header.Get("Authorization")
+		if strings.HasPrefix(authHeader, "Bearer ") {
+			auth = strings.TrimPrefix(authHeader, "Bearer ")
+		}
+	}
+	if auth == "" {
+		auth = r.URL.Query().Get("apikey")
+	}
+	return s.apiKey != "" && auth == s.apiKey
 }
 
 func withCORS(h http.Handler) http.Handler {
@@ -528,7 +557,7 @@ func (s *server) doWebRTC(sess *Session, w http.ResponseWriter, r *http.Request)
 		}
 	}
 	sess.setBridge(callID, bridge)
-	writeJSON(w, http.StatusOK, map[string]string{"sdp_answer": answer})
+	writeJSON(w, http.StatusOK, map[string]any{"sdp_answer": answer, "prebuffer_ms": s.prebuffer.WebRTC})
 }
 
 func (s *server) doAccept(sess *Session, w http.ResponseWriter, r *http.Request) {

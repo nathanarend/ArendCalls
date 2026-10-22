@@ -14,6 +14,14 @@ export const adminRoutes: RouteInfo[] = [
   { method: "GET", path: "/api/panel-settings", purpose: "Ler o switch global 'o painel mostra chamadas recebidas'", response: { inboundCalls: true } },
   { method: "PATCH", path: "/api/panel-settings", purpose: "Ligar/desligar globalmente a exibição de chamadas recebidas no painel. Uma conta com override ligado ainda aparece (OU lógico).", payload: { inboundCalls: false }, response: { status: "ok", inboundCalls: false } },
   { method: "GET", path: "/api/events", purpose: "Eventos Server-Sent globais e disparo de Webhooks em paralelo" },
+  { method: "GET", path: "/api/migration/status", purpose: "Estado da migração entre servidores nesta instância (papel source/target, fase, progresso, registro)" },
+  {
+    method: "POST",
+    path: "/api/migration/import",
+    purpose: "No DESTINO: clona o banco inteiro de outra instância (contas com chaves, webhooks, gravações pendentes). O destino precisa estar sem contas pareadas. A origem é bloqueada, conferida e só apaga as chaves dela depois que o destino confirma.",
+    payload: { sourceUrl: "https://calls.servidor-antigo.com", sourceApiKey: "API_KEY_DA_ORIGEM", allowInsecure: false },
+    response: { migrationId: "5d86cc6c..." },
+  },
 ];
 
 export const sessionRoutes: RouteInfo[] = [
@@ -40,7 +48,22 @@ export const sessionRoutes: RouteInfo[] = [
     response: { call: { callId: "1A2B3C..." } },
     requiresSid: true,
   },
-  { method: "POST", path: "/api/sessions/{sid}/calls/{id}/webrtc", purpose: "Trocar o SDP WebRTC do navegador", payload: { sdp_offer: "v=0\no=- 123456..." }, requiresSid: true },
+  { method: "POST", path: "/api/sessions/{sid}/calls/{id}/webrtc", purpose: "Trocar o SDP WebRTC do navegador. prebuffer_ms = atraso (ms) que o cliente aplica no início de cada fala do contato (env AUDIO_PREBUFFER_MS_WEBRTC).", payload: { sdp_offer: "v=0\no=- 123456..." }, response: { sdp_answer: "v=0\no=- ...", prebuffer_ms: 0 }, requiresSid: true },
+  {
+    method: "POST",
+    path: "/api/sessions/{sid}/calls/{id}/audio-ticket",
+    purpose:
+      "Emitir ticket de uso único (30 s) para o navegador abrir o WebSocket de áudio desta chamada sem a API key. Chame do seu backend.",
+    response: { ticket: "9f2c...(64 hex)", expiresIn: 30 },
+    requiresSid: true,
+  },
+  {
+    method: "GET",
+    path: "/api/sessions/{sid}/calls/{id}/audio",
+    purpose:
+      "WebSocket de áudio (alternativa ao /webrtc, funciona atrás de proxy/tunnel). Autentica com ?ticket=, cookie do painel ou API key. Mensagens binárias = PCM Int16 LE 16 kHz mono. A primeira mensagem do servidor é texto: {\"type\":\"config\",\"prebufferMs\":60} (env AUDIO_PREBUFFER_MS_WEBSOCKET).",
+    requiresSid: true,
+  },
   {
     method: "POST",
     path: "/api/sessions/{sid}/calls/{id}/accept",

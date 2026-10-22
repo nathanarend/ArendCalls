@@ -1,4 +1,5 @@
-export type SessionState = "connecting" | "qr" | "open" | "stopped" | "logged_out";
+/** replaced = outra conexão (outro servidor) usa as mesmas chaves; não reconecta sozinha. */
+export type SessionState = "connecting" | "qr" | "open" | "stopped" | "logged_out" | "replaced";
 
 export type SessionInfo = {
   id: string;

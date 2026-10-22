@@ -111,7 +111,7 @@ export const CallCard = ({ call }: { call: CallSummary }) => {
                   variant="destructive"
                   size="icon"
                   onClick={() => endCall.mutate({ sid: call.sessionId, callId: call.callId })}
-                  aria-label="End call"
+                  aria-label="Encerrar chamada"
                 >
                   <PhoneOff className="h-4 w-4" />
                 </Button>

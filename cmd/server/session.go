@@ -41,6 +41,10 @@ type Session struct {
 
 	lastPulse atomic.Int64 // unix nano do último pulso de presença enviado
 	pulsing   atomic.Bool
+
+	// connectedOnce: o login chegou a completar desde que a sessão foi
+	// registrada. A migração usa para saber se o clone já usou as chaves.
+	connectedOnce atomic.Bool
 }
 
 func newSession(mgr *SessionManager, id, name, webhookURL string, panelInbound bool, client *whatsmeow.Client) *Session {
@@ -381,6 +385,13 @@ func (s *Session) handleEvent(rawEvt any) {
 	ctx := context.Background()
 	switch evt := rawEvt.(type) {
 	case *events.Connected:
+		s.connectedOnce.Store(true)
+		if s.mgr.blocked.Load() {
+			// Migração em curso: nada pode ficar conectado aqui.
+			s.log.Warn("connected while migration lock is active; disconnecting")
+			go s.client.Disconnect()
+			return
+		}
 		if id := s.client.Store.ID; id != nil {
 			_ = s.mgr.store.setJID(s.mgr.appCtx, s.id, id.String())
 		}
@@ -397,6 +408,11 @@ func (s *Session) handleEvent(rawEvt any) {
 		go s.refreshPresence(s.mgr.appCtx)
 	case *events.LoggedOut:
 		s.setAuth(AuthSnapshot{State: "logged_out", Paired: false})
+	case *events.StreamReplaced:
+		// Outra conexão com as mesmas chaves (outro servidor, cópia do banco).
+		// O whatsmeow não reconecta sozinho; parado, os dois não brigam.
+		s.log.Error("stream replaced: another server is connected with this account's keys")
+		s.setAuth(AuthSnapshot{State: "replaced", Paired: true})
 	case *events.CallOffer:
 		s.onIncomingOffer(ctx, evt)
 	case *events.CallAccept:
@@ -533,20 +549,20 @@ func (s *Session) info() SessionInfo {
 	return SessionInfo{ID: s.id, Name: s.name, JID: jid, State: a.State, Paired: a.Paired || jid != "", QR: a.QR, WebhookURL: webhookURL, PanelInbound: panelInbound}
 }
 
-func (s *Session) setBridge(callID string, b *Bridge) {
+func (s *Session) setBridge(callID string, b browserLeg) {
 	oldB, found := s.reg.setBridge(callID, b)
 	if !found {
 		b.Close()
 		return
 	}
 	if oldB != nil {
-		oldB.OnTerminalICE = nil
+		oldB.Detach()
 		oldB.Close()
 	}
 }
 
-// removeCall tira a chamada do registro, para o timer de toque e fecha o
-// Bridge. Devolve a chamada removida, ou nil se ela já tinha saído.
+// removeCall tira a chamada do registro, para o timer de toque e fecha a
+// perna do navegador. Devolve a chamada removida, ou nil se ela já tinha saído.
 func (s *Session) removeCall(callID string) *activeCall {
 	ac, ok := s.reg.remove(callID)
 	if !ok {
@@ -586,6 +602,12 @@ func (s *Session) replaceClient(client *whatsmeow.Client) {
 	s.client.Disconnect()
 	s.client = client
 	client.AddEventHandler(s.handleEvent)
+}
+
+func (s *Session) currentClient() *whatsmeow.Client {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.client
 }
 
 func (s *Session) shutdown() {

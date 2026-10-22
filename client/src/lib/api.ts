@@ -1,11 +1,13 @@
 import { getClientId } from "./client-id";
+import { markUnauthorized } from "@/stores/auth";
 
 const baseHeaders = (): HeadersInit => ({
   "X-Client-Id": getClientId(),
   "Content-Type": "application/json",
 });
 
-const checkStatus = async (r: Response, path: string) => {
+export const checkStatus = async (r: Response, path: string) => {
+  if (r.status === 401) markUnauthorized();
   if (!r.ok) {
     const text = await r.text().catch(() => "");
     throw new Error(`${path} ${r.status} ${text}`);

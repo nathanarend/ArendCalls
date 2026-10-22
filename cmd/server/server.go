@@ -16,10 +16,12 @@ import (
 )
 
 type server struct {
+	db         *sql.DB
 	dbPath     string
 	staticDir  string
 	adminToken string
 	apiKey     string
+	panel      *panelAuth // nil = painel sem login (cookie automático)
 	maxCalls   int
 	log        *slog.Logger
 	waLogger   waLog.Logger
@@ -28,6 +30,9 @@ type server struct {
 	broker    *Broker
 	recStore  *recordingStore
 	rec       *recordingController
+	mig       *migrator
+	tickets   *audioTickets
+	prebuffer audioPrebuffer
 	startTime time.Time
 }
 
@@ -41,7 +46,7 @@ func openDB(dbPath string) (*sql.DB, error) {
 	return db, nil
 }
 
-func newServer(ctx context.Context, dbPath, staticDir, apiKey, recDir string, maxCalls, recWorkers int, log *slog.Logger) (*server, error) {
+func newServer(ctx context.Context, dbPath, staticDir, apiKey, recDir string, maxCalls, recWorkers int, panel *panelAuth, log *slog.Logger) (*server, error) {
 	db, err := openDB(dbPath)
 	if err != nil {
 		return nil, err
@@ -60,6 +65,9 @@ func newServer(ctx context.Context, dbPath, staticDir, apiKey, recDir string, ma
 	}
 	recStore, err := newRecordingStore(ctx, db)
 	if err != nil {
+		return nil, err
+	}
+	if err := ensureMigrationTable(ctx, db); err != nil {
 		return nil, err
 	}
 
@@ -82,11 +90,13 @@ func newServer(ctx context.Context, dbPath, staticDir, apiKey, recDir string, ma
 	rand.Read(tokenBytes)
 	adminToken := hex.EncodeToString(tokenBytes)
 
-	return &server{
+	s := &server{
+		db:         db,
 		dbPath:     dbPath,
 		staticDir:  staticDir,
 		adminToken: adminToken,
 		apiKey:     apiKey,
+		panel:      panel,
 		maxCalls:   maxCalls,
 		log:        log,
 		waLogger:   waLogger,
@@ -94,6 +104,10 @@ func newServer(ctx context.Context, dbPath, staticDir, apiKey, recDir string, ma
 		broker:     broker,
 		recStore:   recStore,
 		rec:        rec,
+		tickets:    newAudioTickets(),
+		prebuffer:  prebufferFromEnv(log),
 		startTime:  time.Now(),
-	}, nil
+	}
+	s.mig = newMigrator(s)
+	return s, nil
 }

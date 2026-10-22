@@ -12,7 +12,7 @@
 [![pion](https://img.shields.io/badge/pion-WebRTC-FF6B6B)](https://github.com/pion/webrtc)
 [![Licença](https://img.shields.io/badge/licen%C3%A7a-MIT-green.svg)](#licenca)
 
-[Diferenciais](#diferenciais) · [Início Rápido (Docker)](#inicio-rapido) · [Como Funciona](#como-funciona) · [Arquitetura](#arquitetura) · [Rotas da API](#endpoints) · [Gravação](#gravacao) · [Autenticação](#seguranca)
+[Diferenciais](#diferenciais) · [Início Rápido (Docker)](#inicio-rapido) · [Como Funciona](#como-funciona) · [Arquitetura](#arquitetura) · [Rotas da API](#endpoints) · [Gravação](#gravacao) · [Migração](#migracao) · [Autenticação](#seguranca)
 
 </div>
 
@@ -54,8 +54,9 @@ Este repositório (`ArendCalls`) traz diversas melhorias de engenharia e usabili
 | 📴 **Controle de Chamadas Recebidas no Painel** | Interruptor global para o painel exibir (ou não) chamadas recebidas, com override por conta. Permite usar o painel como console administrativo enquanto SSE/webhooks seguem disparando. |
 | ⏸️ **Modo Espera (Hold) Integrado** | Botão no painel de chamada para colocar o cliente em espera reproduzindo áudio de espera sem encerrar a ligação. |
 | ⚡ **Codec MLow Otimizado** | Encode ~2,7× mais rápido (memoização de twiddles do FFT, pool de scratch da busca CELP) — saída de áudio byte a byte idêntica, mais chamadas simultâneas por VPS. |
-| 🛡️ **Autenticação Unificada** | Chave mestra global (`API_KEY`) para segurança nas integrações de backend e cookies de sessão para o painel web. |
+| 🛡️ **Autenticação Unificada** | Chave mestra global (`API_KEY`) para as integrações de backend e login com senha (hash bcrypt, bloqueio por tentativas) para o painel web. |
 | 🏢 **Gerenciador Visual de Instâncias** | Criar, renomear e gerenciar múltiplas conexões de WhatsApp diretamente pela barra lateral. |
+| 🚚 **Migração entre Servidores** | Clone completo do banco de um servidor para outro pelo painel (contas sem novo QR, webhooks, gravações pendentes), com bloqueio da origem e confirmação em duas fases — as mesmas chaves nunca rodam em dois lugares. |
 | 💾 **Persistência Inteligente** | Contas deslogadas são mantidas salvas no banco de dados SQLite (`logged_out`), preservando IDs e webhooks. |
 | 📊 **Telemetria da VPS sob Demanda** | Modal com RAM, CPU, uptime, goroutines, disco e chamadas ativas — polling só enquanto aberto, zero overhead em background. |
 | 📖 **Guia da API Integrado** | Documentação interativa embutida na própria interface com exemplos de cURL, Webhooks e Server-Sent Events (SSE). |
@@ -158,13 +159,17 @@ go run ./cmd/server -addr :8080 -static client/dist
 | `-recordings-dir` | `recordings` | Pasta para os WAVs de gravação ainda não enviados ao B2 |
 | `-recording-workers` | `3` | Workers concorrentes de upload das gravações para o B2 |
 | `-pprof` | `""` | Se definido, serve `net/http/pprof` nesse endereço (use `127.0.0.1:6060` — **nunca exponha publicamente**) |
+| `-hash-password` | — | Lê uma senha (sem eco no terminal), imprime o hash bcrypt para `ADMIN_PASSWORD_HASH` e sai |
 
 **Variáveis de ambiente relevantes:** `API_KEY` (chave mestra),
+`ADMIN_USER` / `ADMIN_PASSWORD_HASH` (login do painel — ver [Autenticação](#seguranca)),
 `WA_PRESENCE_INTERVAL` (intervalo de keepalive do worker, ex: `24h`, `1h`, padrão: `24h`),
 `WA_PRESENCE_INTERVAL_HOURS` (alternativa numérica para intervalo em horas),
 `RECORDING_CONFIG_KEY` (AES-256-GCM para cifrar credenciais de gravação no
 `wacalls.db` — sem ela, segredos em texto puro + warning), `GOGC` (padrão `200` na
-imagem Docker), `GOMEMLIMIT` (recomendado em produção, ~75% da RAM do container).
+imagem Docker), `GOMEMLIMIT` (recomendado em produção, ~75% da RAM do container),
+`AUDIO_PREBUFFER_MS_WEBRTC` / `AUDIO_PREBUFFER_MS_WEBSOCKET` (pré-buffer da reprodução
+por transporte, 0–500 ms, padrões `0` e `60` — ver [Pré-buffer](#prebuffer)).
 
 ### 🪟 Windows Server (binário nativo)
 
@@ -194,11 +199,30 @@ O mesmo código compila para Windows, sem Docker nem WSL.
    nssm set ArendCalls AppEnvironmentExtra API_KEY=sua_chave_mestra GOGC=200
    nssm start ArendCalls
    ```
+5. **Login do painel** (obrigatório se o painel ficar acessível pela internet). Gere o
+   hash da senha e passe-o ao serviço junto com as outras variáveis — o
+   `AppEnvironmentExtra` substitui a lista inteira a cada chamada:
+   ```powershell
+   C:\arendcalls\arendcalls.exe -hash-password
+   # Senha: ********   →  imprime algo como $2a$12$N5ay...
+   nssm set ArendCalls AppEnvironmentExtra API_KEY=sua_chave_mestra GOGC=200 ADMIN_USER=admin 'ADMIN_PASSWORD_HASH=$2a$12$N5ay...'
+   nssm restart ArendCalls
+   ```
+   Use **aspas simples** no PowerShell: com aspas duplas, os `$` do hash viram variáveis.
+
+**Atrás do Cloudflare Tunnel:** suba com `-addr 127.0.0.1:8080` e aponte o tunnel para
+`http://localhost:8080`. Assim a porta HTTP não fica aberta para a internet (dispense a
+regra TCP 8080 do passo 3) e o IP de origem usado no bloqueio de tentativas de login
+(`CF-Connecting-IP`) só pode vir do Cloudflare.
+O tunnel não transporta UDP, então os clientes precisam usar o
+[transporte de áudio por WebSocket](#transporte-audio) (no painel: Configurações do
+Painel → Transporte de áudio). Nesse caso a regra UDP 50000-50100 do passo 3 também
+deixa de ser necessária.
 
 Para um teste rápido, basta dar duplo clique no `arendcalls.exe`: ele encontra o
 `client\dist` ao lado do executável e sobe em `http://localhost:8080`.
 
-Para HTTPS, coloque um proxy reverso na frente (IIS com ARR, Caddy ou Traefik). No
+Para HTTPS, use o Cloudflare Tunnel ou um proxy reverso na frente (IIS com ARR, Caddy ou Traefik). No
 painel de métricas, o *load average* aparece zerado: o Windows não tem essa métrica.
 
 ---
@@ -276,6 +300,8 @@ Todas as rotas de API exigem autenticação (ver [Segurança](#seguranca)).
 |---|---|---|
 | `POST` | `/api/sessions/{sid}/calls` | Iniciar chamada de voz — `{ phone, record?, clinicId?, duration_ms? }` |
 | `POST` | `/api/sessions/{sid}/calls/{id}/webrtc` | Trocar SDP do WebRTC para streaming de áudio |
+| `POST` | `/api/sessions/{sid}/calls/{id}/audio-ticket` | Ticket de uso único (30 s) para o navegador abrir o WebSocket de áudio sem a API key — ver [Transporte de áudio](#transporte-audio) |
+| `GET` | `/api/sessions/{sid}/calls/{id}/audio` | WebSocket de áudio, alternativa ao `/webrtc` que funciona atrás de proxy/tunnel |
 | `POST` | `/api/sessions/{sid}/calls/{id}/accept` | Atender chamada recebida — `{ record?, clinicId? }` |
 | `POST` | `/api/sessions/{sid}/calls/{id}/reject` | Rejeitar chamada recebida |
 | `POST` | `/api/sessions/{sid}/calls/{id}/hold` · `/unhold` | Colocar em espera / retomar |
@@ -299,6 +325,16 @@ Todas as rotas de API exigem autenticação (ver [Segurança](#seguranca)).
 | `GET` | `/api/system/metrics` | Telemetria sob demanda da VPS e ArendCalls (RAM, CPU, uptime, disco) |
 | `GET` | `/api/events` | Stream global de eventos em tempo real (SSE) |
 | `GET` | `/api/sessions/{sid}/events` | Stream de eventos de uma sessão específica (SSE) |
+
+### Migração entre Servidores
+
+| Método | Rota | Finalidade |
+|---|---|---|
+| `GET` | `/api/migration/status` | Estado da migração nesta instância (papel, fase, progresso, registro) |
+| `POST` | `/api/migration/import` | **No destino:** puxa o clone da origem — `{ sourceUrl, sourceApiKey, allowInsecure? }` |
+| `POST` | `/api/migration/source/lock` | **Na origem** (chamada pelo destino): desconecta tudo e gera o snapshot |
+| `GET` | `/api/migration/source/{mid}/files/{name}` | **Na origem:** download do snapshot / WAVs (aceita `Range`) |
+| `POST` | `/api/migration/source/{mid}/commit` · `/abort` | **Na origem:** confirmar (apaga as chaves locais) ou desbloquear |
 
 ---
 
@@ -385,8 +421,115 @@ administrativo enquanto um app/endpoint externo atende as chamadas.
 
 ---
 
+<a id="transporte-audio"></a>
+## 🎧 Transporte de Áudio: WebRTC ou WebSocket
+
+O áudio entre navegador e servidor é PCM bruto (**Int16 LE, 16 kHz, mono**) nos dois
+sentidos. O cliente escolhe o transporte ao conectar o áudio de cada chamada; o
+servidor oferece os dois sempre, e nada no resto da API muda.
+
+| | WebRTC (`POST .../webrtc`) | WebSocket (`GET .../audio`) |
+|---|---|---|
+| Canal | DataChannel `pcm` | Uma mensagem binária por quadro |
+| Rede | UDP direto até o servidor (50000-50100) | HTTP/WebSocket: passa por proxy e Cloudflare Tunnel |
+| Quando usar | Servidor com IP público | Servidor atrás de NAT/tunnel, sem UDP de entrada |
+
+O painel usa WebRTC por padrão; a escolha fica em **Configurações do Painel →
+Transporte de áudio** e vale para aquele navegador.
+
+**Autenticação do WebSocket**, nesta ordem:
+1. `?ticket=` — para clientes de outra origem (um CRM). O backend do cliente chama
+   `POST /api/sessions/{sid}/calls/{id}/audio-ticket` com a API key e recebe
+   `{ "ticket": "<64 hex>", "expiresIn": 30 }`; o navegador conecta em
+   `wss://.../api/sessions/{sid}/calls/{id}/audio?ticket=...`. O ticket vale 30 s,
+   uma vez só, e só para aquela chamada. A API key nunca vai para o navegador.
+2. Cookie do painel — exige `Origin` igual ao host (proteção contra CSWSH).
+3. API key (`X-Api-Key`, `Authorization: Bearer` ou `?apikey=`).
+
+**Fechamento e queda.** O servidor fecha com `1000 call_ended` quando a chamada
+termina e com `1000 replaced` quando outra conexão de áudio assume a chamada (ex.:
+retomada depois da espera). Qualquer outra queda é anormal: o servidor espera
+**15 s** por uma nova conexão (com ticket novo) antes de encerrar a chamada, e com a
+chamada em espera não encerra. O servidor manda ping a cada 20 s, porque o
+Cloudflare derruba WebSocket ocioso depois de ~100 s.
+
+**Mensagens do WebSocket.** Binário = um quadro de áudio. A primeira mensagem do
+servidor, antes de qualquer áudio, é texto: `{"type":"config","prebufferMs":60}`.
+Clientes que não usam pré-buffer podem ignorar mensagens de texto.
+
+<a id="prebuffer"></a>
+**Pré-buffer da reprodução.** Quando o contato pausa a fala, o WhatsApp para de mandar
+quadros (DTX) e o buffer do navegador esvazia. Na volta, o primeiro quadro tocaria na
+hora, e qualquer atraso do seguinte vira um picote na primeira sílaba. Com pré-buffer,
+o cliente segura o início de cada fala por N ms antes de tocar: N ms a mais de latência
+só no começo da fala, em troca de absorver o jitter. O valor é por transporte, definido
+no servidor e entregue ao cliente (no WebRTC, em `prebuffer_ms` da resposta do
+`/webrtc`; no WebSocket, na mensagem `config`):
+
+| Variável | Padrão | |
+|---|---|---|
+| `AUDIO_PREBUFFER_MS_WEBRTC` | `0` | Desligado: UDP tem pouco jitter |
+| `AUDIO_PREBUFFER_MS_WEBSOCKET` | `60` | TCP/tunnel: um pacote atrasado segura os seguintes |
+
+Aceita 0–500; valor inválido usa o padrão (com aviso no log). O valor em uso aparece no
+log de início (`audio prebuffer webrtc_ms=… websocket_ms=…`) e no console do navegador
+(`[arendcalls] prebuffer=…ms`). Para trocar, reinicie o servidor; vale a partir da
+próxima ligação. Se ouvir picote no começo das falas, aumente; se a conversa parecer
+"atrasada", diminua.
+
+**Restrições:**
+- WebSocket é TCP: um pacote perdido segura os seguintes até ser retransmitido. Em
+  rede ruim isso aparece como atraso pontual em vez de picote. É a troca aceita para
+  funcionar atrás do tunnel.
+- A API de WebSocket do navegador não envia o header `Authorization`. Se houver
+  **Basic Auth no proxy** (ex.: Traefik), a rota `/api/sessions/*/calls/*/audio`
+  precisa ficar fora dele para clientes de outra origem; o ticket é a autenticação.
+  O painel não é afetado (mesma origem, o cookie vai no handshake).
+
+---
+
+<a id="migracao"></a>
+## 🚚 Migração entre Servidores
+
+Move tudo de um servidor ArendCalls (**origem**) para outro (**destino**): contas com as chaves do WhatsApp (sem escanear QR de novo), nomes, IDs, webhooks, configuração de gravação e WAVs ainda não entregues ao B2. No painel do **destino**, clique em ⇄ (barra lateral) e informe a URL e a `API_KEY` da origem.
+
+O protocolo garante que as mesmas chaves nunca ficam ativas nos dois lados:
+
+1. **Bloqueio** — a origem encerra as conexões (sem logout, o aparelho continua vinculado), pausa as gravações e gera um snapshot consistente (`VACUUM INTO`). O bloqueio é persistido: a origem continua parada mesmo se reiniciar.
+2. **Download conferido** — banco e WAVs com sha256 e tamanho exatos; downloads interrompidos retomam via `Range`.
+3. **Verificação** — `integrity_check`, `foreign_key_check`, contagem de linhas igual à da origem e schema atualizado para a versão do destino.
+4. **Import atômico** — uma transação troca todas as tabelas e confere cada uma (linhas + sha256 do conteúdo) antes do commit. Antes disso, o destino guarda um backup de si mesmo.
+5. **Conexão** — o destino conecta as contas. Se **nenhuma** conectar em 90 s, ele volta ao backup e só então desbloqueia a origem.
+6. **Confirmação** — o destino avisa a origem, que apaga as próprias chaves e fica desativada (banner no painel, rotas de escrita respondem `423`). Sem resposta, o destino repete até conseguir; até lá a origem segue bloqueada.
+
+Requisitos e observações:
+
+- O destino precisa estar **vazio** (sem contas pareadas) e na **mesma versão** da origem ou mais nova. Nenhuma chamada pode estar em andamento na origem.
+- Use **https**: o snapshot carrega as chaves das contas. `http` só com `allowInsecure` (rede privada/VPN).
+- Variáveis de ambiente **não** migram (`API_KEY`, `ADMIN_PASSWORD_HASH`, `RECORDING_CONFIG_KEY`). Os segredos de gravação são re-cifrados com a `RECORDING_CONFIG_KEY` do destino.
+- Se o destino não conseguir falar com a origem no fim, o painel da origem oferece **Desbloquear** (o destino não usou as chaves) e **Finalizar manualmente** (o destino está operando). Cada botão explica quando é seguro usá-lo.
+- Uma conta que aparecer como **"Em uso em outro servidor"** recebeu `stream replaced`: outro processo conectou com as mesmas chaves. Ela não reconecta sozinha; mantenha só uma instância ativa.
+
+---
+
 <a id="seguranca"></a>
 ## 🔒 Segurança e Autenticação
+
+### Login do painel web
+Defina `ADMIN_PASSWORD_HASH` (hash bcrypt gerado com `arendcalls -hash-password`) e,
+opcionalmente, `ADMIN_USER` (padrão `admin`). Com o hash definido:
+- o painel pede usuário e senha; a sessão vale 7 dias (cookie `HttpOnly`, `SameSite=Strict`, `Secure` sob HTTPS) e é perdida ao reiniciar o servidor;
+- após 5 senhas erradas, o IP fica bloqueado por 1 min, dobrando a cada novo erro até 15 min;
+- a `API_KEY` segue valendo para integrações.
+
+**Sem `ADMIN_PASSWORD_HASH`, o painel fica aberto** (comportamento antigo: o cookie de
+admin é entregue a quem abrir a página) e o servidor avisa no log. Só use assim atrás
+de um proxy com autenticação própria (ex: Basic Auth no Traefik).
+
+No Docker Compose, escreva cada `$` do hash como `$$`:
+```yaml
+      - ADMIN_PASSWORD_HASH=$$2a$$12$$N5ay...
+```
 
 ### 1. Acesso Direto (Local ou com API Key)
 Envie a chave no cabeçalho `Authorization: Bearer <API_KEY>`, `X-Api-Key: <API_KEY>` ou via parâmetro de URL `?apikey=<API_KEY>`:

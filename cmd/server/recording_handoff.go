@@ -151,6 +151,9 @@ func trimSlash(s string) string {
 // from file size), otherwise marked failed. Everything still pending is then
 // re-queued.
 func (c *recordingController) resumeOnBoot() {
+	if c.paused.Load() {
+		return
+	}
 	stale, err := c.store.staleRecordings(c.appCtx)
 	if err != nil {
 		c.log.Warn("recording: staleRecordings query failed", "err", err)
