@@ -10,7 +10,16 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      "/api": { target: "http://localhost:8080", changeOrigin: true, ws: false },
+      "/api": {
+        target: "http://localhost:8080",
+        changeOrigin: true,
+        // ws: transporte de áudio por WebSocket. O servidor exige Origin igual
+        // ao Host no handshake com cookie; em dev o Host vira localhost:8080.
+        ws: true,
+        configure: (proxy) => {
+          proxy.on("proxyReqWs", (proxyReq) => proxyReq.setHeader("Origin", "http://localhost:8080"));
+        },
+      },
     },
   },
 });

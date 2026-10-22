@@ -43,6 +43,7 @@ func newTestServer(t *testing.T, apiKey, adminToken string) (*server, *httptest.
 		log:        slog.Default(),
 		apiKey:     apiKey,
 		adminToken: adminToken,
+		tickets:    newAudioTickets(),
 	}
 
 	ts := httptest.NewServer(srv.routes())

@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { PlusCircle } from "lucide-react";
+import { Loader2, PlusCircle } from "lucide-react";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Toaster } from "@/components/ui/sonner";
 import { AppShell } from "@/components/layout/AppShell";
@@ -12,8 +12,29 @@ import { ensureSessionsWired, useSessions } from "@/stores/sessions";
 import { ensureCallsWired } from "@/stores/calls";
 import { useTheme } from "@/stores/theme";
 import { ApiDocs } from "@/components/domain/api/ApiDocs";
+import { LoginPage } from "@/components/domain/auth/LoginPage";
+import { checkAuth, useAuth } from "@/stores/auth";
 
 export const App = () => {
+  const status = useAuth((s) => s.status);
+
+  useEffect(() => {
+    void checkAuth();
+  }, []);
+
+  if (status === "checking") {
+    return (
+      <div className="flex min-h-screen items-center justify-center text-muted-foreground">
+        <Loader2 className="h-5 w-5 animate-spin" />
+      </div>
+    );
+  }
+  if (status === "login") return <LoginPage />;
+  return <Panel />;
+};
+
+// Painel só monta depois do login: liga eventos e listas uma vez só.
+const Panel = () => {
   const sessions = useSessions((s) => s.sessions);
   const activeId = useSessions((s) => s.activeId);
   const theme = useTheme((s) => s.theme);

@@ -95,6 +95,11 @@ func (b *Bridge) WritePCM(pcm []float32) error {
 	return dc.Send(media.PCMFloat32ToInt16LE(pcm))
 }
 
+// Detach: a perna foi substituída; a queda dela não pode mais encerrar a chamada.
+func (b *Bridge) Detach() {
+	b.OnTerminalICE = nil
+}
+
 func (b *Bridge) Close() {
 	if b.pc != nil {
 		_ = b.pc.Close()

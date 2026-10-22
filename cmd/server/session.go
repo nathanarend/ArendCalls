@@ -533,20 +533,20 @@ func (s *Session) info() SessionInfo {
 	return SessionInfo{ID: s.id, Name: s.name, JID: jid, State: a.State, Paired: a.Paired || jid != "", QR: a.QR, WebhookURL: webhookURL, PanelInbound: panelInbound}
 }
 
-func (s *Session) setBridge(callID string, b *Bridge) {
+func (s *Session) setBridge(callID string, b browserLeg) {
 	oldB, found := s.reg.setBridge(callID, b)
 	if !found {
 		b.Close()
 		return
 	}
 	if oldB != nil {
-		oldB.OnTerminalICE = nil
+		oldB.Detach()
 		oldB.Close()
 	}
 }
 
-// removeCall tira a chamada do registro, para o timer de toque e fecha o
-// Bridge. Devolve a chamada removida, ou nil se ela já tinha saído.
+// removeCall tira a chamada do registro, para o timer de toque e fecha a
+// perna do navegador. Devolve a chamada removida, ou nil se ela já tinha saído.
 func (s *Session) removeCall(callID string) *activeCall {
 	ac, ok := s.reg.remove(callID)
 	if !ok {

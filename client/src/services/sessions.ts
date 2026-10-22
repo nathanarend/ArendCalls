@@ -1,4 +1,4 @@
-import { apiGet, apiPost, apiPatch, apiDelete } from "@/lib/api";
+import { apiGet, apiPost, apiPatch, apiDelete, checkStatus } from "@/lib/api";
 import { getClientId } from "@/lib/client-id";
 import type { SessionInfo, RecordingConfig, RecordingConfigPatch, RecordingsOverview } from "@/types/session";
 
@@ -43,7 +43,7 @@ const postVoid = async (path: string): Promise<void> => {
     headers: { "X-Client-Id": getClientId(), "Content-Type": "application/json" },
     body: "{}",
   });
-  if (!r.ok) throw new Error(`${path} ${r.status}`);
+  await checkStatus(r, path);
 };
 
 export const logoutSession = (id: string) => postVoid(`/api/sessions/${id}/logout`);

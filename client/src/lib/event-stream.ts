@@ -1,5 +1,6 @@
 import type { CallStatus } from "@/types/call";
 import type { SessionInfo, SessionState } from "@/types/session";
+import { checkAuth } from "@/stores/auth";
 
 type CallListRow = {
   sessionId: string;
@@ -38,7 +39,11 @@ class EventStream {
         for (const l of this.#listeners) l(parsed);
       } catch {}
     };
-    this.#es.onerror = () => {};
+    // EventSource desiste de reconectar quando a resposta não é 200 (ex: 401
+    // com a sessão expirada): confere o login para cair na tela de entrar.
+    this.#es.onerror = () => {
+      if (this.#es?.readyState === EventSource.CLOSED) void checkAuth();
+    };
   }
 
   on(l: Listener): () => void {

@@ -1,12 +1,14 @@
 import { useState, type ReactNode } from "react";
-import { Menu, PhoneCall } from "lucide-react";
+import { LogOut, Menu, PhoneCall } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { Sidebar } from "./Sidebar";
 import { ThemeToggle } from "./ThemeToggle";
+import { logout, useAuth } from "@/stores/auth";
 
 export const AppShell = ({ children }: { children: ReactNode }) => {
   const [mobileOpen, setMobileOpen] = useState(false);
+  const authRequired = useAuth((s) => s.authRequired);
 
   return (
     <div className="flex min-h-screen flex-col">
@@ -30,6 +32,11 @@ export const AppShell = ({ children }: { children: ReactNode }) => {
         </div>
         <div className="flex items-center gap-1.5">
           <ThemeToggle />
+          {authRequired && (
+            <Button variant="outline" size="icon" onClick={() => void logout()} aria-label="Sair" title="Sair">
+              <LogOut className="h-4 w-4" />
+            </Button>
+          )}
         </div>
       </header>
       <div className="flex flex-1">

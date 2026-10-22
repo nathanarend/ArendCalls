@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"flag"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/pprof"
@@ -27,7 +28,16 @@ func main() {
 	pprofAddr := flag.String("pprof", "", "If set, serve net/http/pprof on this address (bind to localhost, e.g. 127.0.0.1:6060 — never expose publicly)")
 	recDir := flag.String("recordings-dir", "recordings", "Directory for server-side call recordings")
 	recWorkers := flag.Int("recording-workers", 3, "Concurrent B2 upload workers for call recordings")
+	hashPassword := flag.Bool("hash-password", false, "Read a password from stdin, print its bcrypt hash for ADMIN_PASSWORD_HASH and exit")
 	flag.Parse()
+
+	if *hashPassword {
+		if err := runHashPassword(os.Stdin, os.Stdout); err != nil {
+			fmt.Fprintln(os.Stderr, "erro:", err)
+			os.Exit(1)
+		}
+		return
+	}
 
 	logLevel := slog.LevelInfo
 	if *debug {
@@ -73,15 +83,32 @@ func main() {
 		apiKey = os.Getenv("API_KEY")
 	}
 
+	// Login do painel: só com ADMIN_PASSWORD_HASH. Sem ele, painel aberto
+	// (cookie automático) — compatível com instalações atrás de proxy com
+	// Basic Auth.
+	var panel *panelAuth
+	if hash := os.Getenv("ADMIN_PASSWORD_HASH"); hash != "" {
+		p, err := newPanelAuth(os.Getenv("ADMIN_USER"), hash)
+		if err != nil {
+			log.Error("startup failed", "err", err)
+			os.Exit(1)
+		}
+		panel = p
+		log.Info("panel login enabled", "user", p.user)
+	} else {
+		log.Warn("panel login disabled — anyone reaching the panel URL has full access; set ADMIN_PASSWORD_HASH (see -hash-password)")
+	}
+
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
-	srv, err := newServer(ctx, *dbPath, *staticDir, apiKey, *recDir, *maxCalls, *recWorkers, log)
+	srv, err := newServer(ctx, *dbPath, *staticDir, apiKey, *recDir, *maxCalls, *recWorkers, panel, log)
 	if err != nil {
 		log.Error("startup failed", "err", err)
 		os.Exit(1)
 	}
 	defer srv.sessions.disconnectAll()
+	log.Info("audio prebuffer", "webrtc_ms", srv.prebuffer.WebRTC, "websocket_ms", srv.prebuffer.WebSocket)
 
 	srv.rec.start()
 
