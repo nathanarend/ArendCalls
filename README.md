@@ -12,7 +12,7 @@
 [![pion](https://img.shields.io/badge/pion-WebRTC-FF6B6B)](https://github.com/pion/webrtc)
 [![Licença](https://img.shields.io/badge/licen%C3%A7a-MIT-green.svg)](#licenca)
 
-[Diferenciais](#diferenciais) · [Início Rápido (Docker)](#inicio-rapido) · [Como Funciona](#como-funciona) · [Arquitetura](#arquitetura) · [Rotas da API](#endpoints) · [Gravação](#gravacao) · [Migração](#migracao) · [Autenticação](#seguranca)
+[Diferenciais](#diferenciais) · [Início Rápido (Docker)](#inicio-rapido) · [Windows + Cloudflare Tunnel](#cloudflare-tunnel) · [Como Funciona](#como-funciona) · [Arquitetura](#arquitetura) · [Rotas da API](#endpoints) · [Gravação](#gravacao) · [Migração](#migracao) · [Autenticação](#seguranca)
 
 </div>
 
@@ -33,6 +33,9 @@ Todo o ecossistema VoIP roda **nativamente em puro Go**:
 - **Gravação da chamada no servidor** (WAV estéreo) com upload direto para o Backblaze B2 — opcional, por chamada
 - Cliente moderno construído em **React 19 + Tailwind CSS**
 - **Sem necessidade de CGO, compiladores C ou DLLs externas** (binário estático)
+
+> [!TIP]
+> **Windows sem abrir portas:** rode o `arendcalls.exe` e acesse o painel de qualquer lugar por um endereço `https://` com o **Cloudflare Tunnel**. É o jeito mais fácil: nada de IP fixo, roteador ou certificado. [Passo a passo](#cloudflare-tunnel).
 
 > [!TIP]
 > **Compatível em paralelo com WAHA / APIs de Mensagens:**
@@ -61,6 +64,7 @@ Este repositório (`ArendCalls`) traz diversas melhorias de engenharia e usabili
 | 📊 **Telemetria da VPS sob Demanda** | Modal com RAM, CPU, uptime, goroutines, disco e chamadas ativas — polling só enquanto aberto, zero overhead em background. |
 | 📖 **Guia da API Integrado** | Documentação interativa embutida na própria interface com exemplos de cURL, Webhooks e Server-Sent Events (SSE). |
 | 🔄 **Máquina de Estados Precisa** | Status claros e confiáveis: *Ligando...* (`starting`) ➔ *Chamando...* (`ringing` ao tocar) ➔ *Em chamada* (`active`). |
+| ☁️ **Windows + Cloudflare Tunnel** | Painel acessível pela internet a partir de um Windows comum, sem abrir portas nem configurar roteador: `cloudflared` como serviço + áudio por WebSocket. |
 | 🐳 **Pronto para Produção (Docker)** | Imagem oficial e leve no DockerHub (`nathanarend/arendcalls:latest`), binário estático sem CGO, com suporte nativo a Traefik. |
 
 ---
@@ -210,20 +214,58 @@ O mesmo código compila para Windows, sem Docker nem WSL.
    ```
    Use **aspas simples** no PowerShell: com aspas duplas, os `$` do hash viram variáveis.
 
-**Atrás do Cloudflare Tunnel:** suba com `-addr 127.0.0.1:8080` e aponte o tunnel para
-`http://localhost:8080`. Assim a porta HTTP não fica aberta para a internet (dispense a
-regra TCP 8080 do passo 3) e o IP de origem usado no bloqueio de tentativas de login
-(`CF-Connecting-IP`) só pode vir do Cloudflare.
-O tunnel não transporta UDP, então os clientes precisam usar o
-[transporte de áudio por WebSocket](#transporte-audio) (no painel: Configurações do
-Painel → Transporte de áudio). Nesse caso a regra UDP 50000-50100 do passo 3 também
-deixa de ser necessária.
-
 Para um teste rápido, basta dar duplo clique no `arendcalls.exe`: ele encontra o
 `client\dist` ao lado do executável e sobe em `http://localhost:8080`.
 
-Para HTTPS, use o Cloudflare Tunnel ou um proxy reverso na frente (IIS com ARR, Caddy ou Traefik). No
+Para HTTPS, use o [Cloudflare Tunnel](#cloudflare-tunnel) (abaixo) ou um proxy reverso na frente (IIS com ARR, Caddy ou Traefik). No
 painel de métricas, o *load average* aparece zerado: o Windows não tem essa métrica.
+
+<a id="cloudflare-tunnel"></a>
+### ☁️ Acesso pela internet com Cloudflare Tunnel (Windows, o jeito mais fácil)
+
+O `cloudflared` cria uma conexão **de saída** do Windows até a Cloudflare e publica o
+painel num endereço `https://` seu (ex.: `https://calls.seudominio.com`). Não precisa de
+IP fixo, redirecionamento de porta no roteador nem certificado. Também funciona num PC
+atrás de NAT/CGNAT.
+
+**Pré-requisito:** um domínio adicionado à sua conta Cloudflare (plano gratuito serve).
+
+1. **Suba o ArendCalls** (duplo clique no `arendcalls.exe` ou serviço NSSM acima) e
+   confirme que o painel abre em `http://localhost:8080`. Com o tunnel, prefira
+   `-addr 127.0.0.1:8080` (no `nssm install`, no lugar de `-addr :8080`): o painel deixa
+   de ser acessível direto pela rede, só pelo tunnel.
+2. **Instale o `cloudflared`** (PowerShell):
+   ```powershell
+   winget install --id Cloudflare.cloudflared
+   ```
+   Sem winget: baixe o `cloudflared-windows-amd64.msi` nos
+   [releases do cloudflared](https://github.com/cloudflare/cloudflared/releases/latest).
+3. **Crie o tunnel** no painel da Cloudflare: **Networking → Tunnels → Create a tunnel**,
+   dê um nome (ex.: `arendcalls`) e escolha **Windows**. Copie o
+   comando que aparece (`cloudflared.exe service install <token>`) e rode num
+   **PowerShell como administrador**. Ele instala o tunnel como serviço do Windows, que
+   sobe sozinho com o computador.
+4. **Publique o painel:** no tunnel, aba **Routes → Add route → Published application**.
+   Escolha o subdomínio e o domínio, e em **Service URL** informe `http://localhost:8080`.
+5. **Ligue o login do painel** (passo 5 do serviço NSSM acima). O painel passa a estar na
+   internet: sem `ADMIN_PASSWORD_HASH`, qualquer pessoa com o endereço tem acesso total.
+6. **Troque o áudio para WebSocket** em cada navegador que for atender: **Configurações
+   do Painel → Transporte de áudio → WebSocket**. O tunnel não transporta UDP, então o
+   WebRTC não conecta por ele.
+
+Pronto: abra `https://calls.seudominio.com`. Com o tunnel, as regras de firewall do
+passo 3 do serviço deixam de ser necessárias (TCP 8080 e UDP 50000-50100).
+
+O bloqueio de tentativas de login usa o IP do cabeçalho `CF-Connecting-IP`. Com
+`-addr 127.0.0.1:8080` só o `cloudflared` alcança o ArendCalls, então esse cabeçalho só
+pode vir da Cloudflare. Escutando em todas as interfaces (`:8080`), alguém na rede local
+pode forjá-lo.
+
+> [!WARNING]
+> **Não use o tunnel rápido** (`cloudflared tunnel --url http://localhost:8080`, endereço
+> `*.trycloudflare.com`). Ele [não suporta Server-Sent Events](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/do-more-with-tunnels/trycloudflare/),
+> e o painel depende deles para mostrar QR code, status das contas e chamadas recebidas
+> em tempo real. O endereço também muda a cada reinício.
 
 ---
 
