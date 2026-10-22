@@ -592,6 +592,17 @@ func (m *migrator) cloneTx(ctx context.Context, conn *sql.Conn, finalize func(tx
 	}
 	delete(mainT, migrationExcludedTable)
 	delete(srcT, migrationExcludedTable)
+	for name, legacy := range migrationLegacyColumns {
+		st, ok := srcT[name]
+		if !ok {
+			continue
+		}
+		mt := mainT[name]
+		st.cols = slices.DeleteFunc(slices.Clone(st.cols), func(c string) bool {
+			return slices.Contains(legacy, c) && !slices.Contains(mt.cols, c)
+		})
+		srcT[name] = st
+	}
 
 	for name, st := range srcT {
 		mt, ok := mainT[name]

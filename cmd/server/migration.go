@@ -54,6 +54,13 @@ const (
 // migrationExcludedTable nunca entra no clone: cada lado guarda o próprio estado.
 const migrationExcludedTable = "migration_state"
 
+// migrationLegacyColumns: colunas que bancos antigos ainda carregam (SQLite não
+// remove coluna) mas que nenhuma versão atual usa. Ficam de fora do clone em vez
+// de barrar a importação como se o destino fosse mais antigo.
+var migrationLegacyColumns = map[string][]string{
+	"sessions": {"api_key"}, // auth por conta, anterior à API key global
+}
+
 type migrationState struct {
 	Role      string             `json:"role,omitempty"`
 	ID        string             `json:"id,omitempty"`

@@ -413,6 +413,32 @@ func TestMigrationSourceLockSurvivesRestart(t *testing.T) {
 	}
 }
 
+func TestCloneTablesSkipsLegacyColumns(t *testing.T) {
+	ctx := context.Background()
+	a := newMigNode(t, t.TempDir(), "key-a", "rec-key-a", nil)
+	if _, err := a.srv.db.Exec(`ALTER TABLE sessions ADD COLUMN api_key TEXT`); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.srv.sessions.store.insert(ctx, "old", "Antiga"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.srv.db.Exec(`UPDATE sessions SET api_key='legado'`); err != nil {
+		t.Fatal(err)
+	}
+	src := filepath.Join(t.TempDir(), "src.db")
+	if _, err := a.srv.db.Exec(`VACUUM INTO ?`, src); err != nil {
+		t.Fatal(err)
+	}
+
+	b := newMigNode(t, t.TempDir(), "key-b", "rec-key-b", nil)
+	if _, err := b.srv.mig.cloneTables(ctx, src, nil); err != nil {
+		t.Fatalf("coluna legada barrou o clone: %v", err)
+	}
+	if n := b.count(t, "sessions"); n != 1 {
+		t.Fatalf("esperava 1 conta clonada, veio %d", n)
+	}
+}
+
 func TestCloneTablesRejectsUnknownSourceTable(t *testing.T) {
 	ctx := context.Background()
 	b := newMigNode(t, t.TempDir(), "key-b", "rec-key-b", nil)
