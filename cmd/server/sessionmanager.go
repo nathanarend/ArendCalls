@@ -210,7 +210,8 @@ func (m *SessionManager) Create(name string) (string, error) {
 	}
 	device := m.container.NewDevice()
 	client := whatsmeow.NewClient(device, m.waLogger)
-	s := newSession(m, id, name, "", true, client)
+	// panelInbound nasce desligado, igual ao DEFAULT 0 do banco: é override.
+	s := newSession(m, id, name, "", false, client)
 	m.register(s)
 	m.broker.emitSessionList(m.infos())
 	if err := s.startPairing(m.appCtx); err != nil {
