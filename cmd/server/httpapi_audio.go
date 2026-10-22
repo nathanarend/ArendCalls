@@ -6,6 +6,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/coder/websocket"
@@ -18,8 +19,19 @@ import (
 // navegador. O cliente escolhe o transporte ao conectar o áudio.
 
 // wsReconnectGrace: carência para o cliente reconectar depois de uma queda do
-// WebSocket, como o ICE tolera instabilidade no WebRTC. Variável para os testes.
-var wsReconnectGrace = 15 * time.Second
+// WebSocket, como o ICE tolera instabilidade no WebRTC.
+const wsReconnectGrace = 15 * time.Second
+
+// wsReconnectGraceOverride (ns) troca a carência nos testes. Atômica: timers de
+// outros testes ainda leem enquanto um teste troca o valor.
+var wsReconnectGraceOverride atomic.Int64
+
+func reconnectGrace() time.Duration {
+	if d := wsReconnectGraceOverride.Load(); d > 0 {
+		return time.Duration(d)
+	}
+	return wsReconnectGrace
+}
 
 // audioPrebuffer: atraso de reprodução (ms) no início de cada fala, que o
 // cliente aplica ao áudio do contato. Com o buffer vazio após uma pausa (DTX),
@@ -160,7 +172,8 @@ func (s *server) onAudioLegDropped(sess *Session, callID string, leg browserLeg)
 	if cur, ok := sess.reg.bridgeOf(callID); !ok || cur != leg {
 		return
 	}
-	time.AfterFunc(wsReconnectGrace, func() {
+	grace := reconnectGrace()
+	time.AfterFunc(grace, func() {
 		if cur, ok := sess.reg.bridgeOf(callID); !ok || cur != leg {
 			return
 		}
@@ -172,7 +185,7 @@ func (s *server) onAudioLegDropped(sess *Session, callID string, leg browserLeg)
 			s.log.Info("audio websocket closed while on HOLD (transfer in progress), keeping WhatsApp call alive", "callID", callID)
 			return
 		}
-		s.log.Info("audio websocket not reconnected, ending call", "callID", callID, "grace", wsReconnectGrace)
+		s.log.Info("audio websocket not reconnected, ending call", "callID", callID, "grace", grace)
 		sess.terminateCall(callID, core.EndCallReasonUserEnded)
 	})
 }

@@ -171,9 +171,8 @@ func (fakeLeg) Close()                   {}
 
 func withWSReconnectGrace(t *testing.T, d time.Duration) {
 	t.Helper()
-	prev := wsReconnectGrace
-	wsReconnectGrace = d
-	t.Cleanup(func() { wsReconnectGrace = prev })
+	prev := wsReconnectGraceOverride.Swap(int64(d))
+	t.Cleanup(func() { wsReconnectGraceOverride.Store(prev) })
 }
 
 func TestAudioLegDropGrace(t *testing.T) {
