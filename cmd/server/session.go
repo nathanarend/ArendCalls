@@ -417,8 +417,10 @@ func (s *Session) handleEvent(rawEvt any) {
 	// Falhas de conexão: o logger do whatsmeow é Noop fora do -debug, então sem
 	// isto a sessão fica "connecting" para sempre sem nada no log.
 	case *events.ClientOutdated:
-		s.log.Error("connect failure: client outdated (405), update whatsmeow",
-			"wa_version", store.GetWAVersion().String())
+		failed := store.GetWAVersion()
+		s.log.Error("connect failure: client outdated (405); checking web.whatsapp.com",
+			"wa_version", failed.String())
+		go s.retryAfterOutdated(failed)
 	case *events.TemporaryBan:
 		s.log.Error("connect failure: temporary ban", "code", evt.Code, "expire", evt.Expire)
 	case *events.ConnectFailure:

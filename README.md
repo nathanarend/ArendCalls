@@ -169,6 +169,7 @@ go run ./cmd/server -addr :8080 -static client/dist
 `ADMIN_USER` / `ADMIN_PASSWORD_HASH` (login do painel — ver [Autenticação](#seguranca)),
 `WA_PRESENCE_INTERVAL` (intervalo de keepalive do worker, ex: `24h`, `1h`, padrão: `24h`),
 `WA_PRESENCE_INTERVAL_HOURS` (alternativa numérica para intervalo em horas),
+`WA_VERSION_CHECK_HOUR` (hora local, 0–23, da checagem diária da versão do cliente WhatsApp; se mudou, reconecta as contas abertas sem ligação ativa; padrão: `3`),
 `RECORDING_CONFIG_KEY` (AES-256-GCM para cifrar credenciais de gravação no
 `wacalls.db` — sem ela, segredos em texto puro + warning), `GOGC` (padrão `200` na
 imagem Docker), `GOMEMLIMIT` (recomendado em produção, ~75% da RAM do container),

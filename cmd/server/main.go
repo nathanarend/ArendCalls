@@ -118,11 +118,15 @@ func main() {
 
 	srv.rec.start()
 
+	// Antes de conectar: a versão do cliente só vale no handshake.
+	refreshWAVersion(ctx, log)
+
 	if err := srv.sessions.Restore(ctx); err != nil {
 		log.Error("session restore failed", "err", err)
 		os.Exit(1)
 	}
 	srv.mig.resumeJobs(ctx)
+	srv.startWAVersionWorker(ctx)
 
 	httpSrv := &http.Server{Addr: *addr, Handler: srv.routes()}
 	go func() {
