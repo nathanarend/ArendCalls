@@ -176,6 +176,29 @@ imagem Docker), `GOMEMLIMIT` (recomendado em produção, ~75% da RAM do containe
 `AUDIO_PREBUFFER_MS_WEBRTC` / `AUDIO_PREBUFFER_MS_WEBSOCKET` (pré-buffer da reprodução
 por transporte, 0–500 ms, padrões `0` e `60` — ver [Pré-buffer](#prebuffer)).
 
+### 📦 Pacote pronto (Windows e Linux): extrair e executar
+
+Cada release traz um pacote com o binário, o painel já compilado, o script
+`iniciar` e um `.env.example`:
+
+| Sistema | Arquivo |
+| --- | --- |
+| Windows x64 | `arendcalls-<versão>-windows-amd64.zip` |
+| Linux x64 | `arendcalls-<versão>-linux-amd64.tar.gz` |
+| Linux ARM64 | `arendcalls-<versão>-linux-arm64.tar.gz` |
+
+1. Baixe na [página de Releases](https://github.com/nathanarend/ArendCalls/releases) e extraia.
+2. Rode o `iniciar.bat` (Windows, duplo clique) ou `./iniciar.sh` (Linux). Na primeira
+   vez ele cria o `.env` a partir do `.env.example` e para; preencha `API_KEY` e o login
+   do painel (`ADMIN_USER` + `ADMIN_PASSWORD_HASH`, gerado com `arendcalls -hash-password`).
+3. Rode o `iniciar` de novo. O painel abre em `http://127.0.0.1:8080` (mude `ADDR` no
+   `.env` para `:8080` para abrir na rede).
+
+O `.env` usa `CHAVE=valor`, sem aspas. Ele não vem no pacote: para atualizar, extraia a
+versão nova por cima da pasta atual e o `.env`, o `wacalls.db` e as gravações ficam como
+estão. No Windows, `CLOUDFLARE_QUICK_TUNNEL=1` no `.env` abre um quick tunnel
+(`trycloudflare.com`) junto; para endereço fixo, veja o [Cloudflare Tunnel](#cloudflare-tunnel).
+
 ### 🪟 Windows Server (binário nativo)
 
 O mesmo código compila para Windows, sem Docker nem WSL.
