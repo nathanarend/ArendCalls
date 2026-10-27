@@ -21,6 +21,7 @@ import (
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/appstate"
 	waBinary "go.mau.fi/whatsmeow/binary"
+	"go.mau.fi/whatsmeow/store"
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
 )
@@ -413,6 +414,15 @@ func (s *Session) handleEvent(rawEvt any) {
 		// O whatsmeow não reconecta sozinho; parado, os dois não brigam.
 		s.log.Error("stream replaced: another server is connected with this account's keys")
 		s.setAuth(AuthSnapshot{State: "replaced", Paired: true})
+	// Falhas de conexão: o logger do whatsmeow é Noop fora do -debug, então sem
+	// isto a sessão fica "connecting" para sempre sem nada no log.
+	case *events.ClientOutdated:
+		s.log.Error("connect failure: client outdated (405), update whatsmeow",
+			"wa_version", store.GetWAVersion().String())
+	case *events.TemporaryBan:
+		s.log.Error("connect failure: temporary ban", "code", evt.Code, "expire", evt.Expire)
+	case *events.ConnectFailure:
+		s.log.Error("connect failure", "reason", int(evt.Reason), "message", evt.Message)
 	case *events.CallOffer:
 		s.onIncomingOffer(ctx, evt)
 	case *events.CallAccept:
