@@ -21,7 +21,12 @@ const parsePrebufferMs = (text: string): number | null => {
   }
 };
 
-export const openCallWS = async (sid: string, callId: string, micStream: MediaStream): Promise<OpenCall> => {
+export const openCallWS = async (
+  sid: string,
+  callId: string,
+  micStream: MediaStream,
+  openTimeoutMs?: number,
+): Promise<OpenCall> => {
   const proto = location.protocol === "https:" ? "wss" : "ws";
   const ws = new WebSocket(`${proto}://${location.host}/api/sessions/${sid}/calls/${callId}/audio`);
   ws.binaryType = "arraybuffer";
@@ -30,6 +35,9 @@ export const openCallWS = async (sid: string, callId: string, micStream: MediaSt
     ws.onopen = () => resolve();
     ws.onclose = (e) => reject(new Error(`audio websocket closed before open (${e.code})`));
   });
+  // Pode rejeitar enquanto o grafo é montado, antes do await abaixo.
+  opened.catch(() => {});
+  const openTimer = openTimeoutMs ? setTimeout(() => ws.close(), openTimeoutMs) : undefined;
 
   // A config chega logo após abrir, possivelmente antes de o grafo ficar pronto.
   let prebufferMs = 0;
@@ -60,6 +68,8 @@ export const openCallWS = async (sid: string, callId: string, micStream: MediaSt
   } catch (err) {
     graph.close();
     throw err;
+  } finally {
+    clearTimeout(openTimer);
   }
   ws.onclose = (e) => {
     // eslint-disable-next-line no-console

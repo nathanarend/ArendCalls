@@ -1,18 +1,19 @@
 import { create } from "zustand";
 
-// Transporte de áudio das chamadas deste navegador. WebRTC (padrão) precisa de
-// UDP direto até o servidor; WebSocket funciona atrás de proxy/tunnel
-// (Cloudflare Tunnel). Lido em openCall() a cada chamada.
+// Transporte de áudio das chamadas deste navegador. Automático (padrão) tenta
+// WebRTC e cai para WebSocket sem encerrar a chamada; os outros dois fixam um
+// transporte. Lido em openCall() a cada chamada.
 
-export type AudioTransport = "webrtc" | "websocket";
+export type AudioTransport = "auto" | "webrtc" | "websocket";
 
 const KEY = "arendcalls.audioTransport";
 
 const read = (): AudioTransport => {
   try {
-    return localStorage.getItem(KEY) === "websocket" ? "websocket" : "webrtc";
+    const stored = localStorage.getItem(KEY);
+    return stored === "webrtc" || stored === "websocket" ? stored : "auto";
   } catch {
-    return "webrtc";
+    return "auto";
   }
 };
 

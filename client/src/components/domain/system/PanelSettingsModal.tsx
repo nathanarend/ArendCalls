@@ -7,8 +7,9 @@ import { setPanelInboundCalls } from "@/services/sessions";
 import { type AudioTransport, useAudioTransport } from "@/stores/audioTransport";
 
 const TRANSPORT_OPTIONS: { value: AudioTransport; label: string; help: string }[] = [
-  { value: "webrtc", label: "WebRTC (padrão)", help: "Exige UDP direto até o servidor." },
-  { value: "websocket", label: "WebSocket", help: "Funciona atrás de proxy/tunnel, como o Cloudflare Tunnel." },
+  { value: "auto", label: "Automático (padrão)", help: "Tenta WebRTC; se o áudio não abrir em 4 s, muda para WebSocket sem encerrar a chamada." },
+  { value: "webrtc", label: "WebRTC", help: "Sempre WebRTC. Exige UDP direto até o servidor." },
+  { value: "websocket", label: "WebSocket", help: "Sempre WebSocket. Funciona atrás de proxy/tunnel, como o Cloudflare Tunnel." },
 ];
 
 export const PanelSettingsModal = ({
@@ -69,7 +70,7 @@ export const PanelSettingsModal = ({
               <input
                 type="radio"
                 name="audio-transport"
-                className="mt-0.5 h-4 w-4 accent-primary"
+                className="mt-0.5 h-4 w-4 shrink-0 accent-primary"
                 checked={transport === o.value}
                 onChange={() => setTransport(o.value)}
               />

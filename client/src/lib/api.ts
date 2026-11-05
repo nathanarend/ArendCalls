@@ -20,8 +20,21 @@ export const apiGet = async <T>(path: string): Promise<T> => {
   return r.json() as Promise<T>;
 };
 
-export const apiPost = async <T>(path: string, body: unknown): Promise<T> => {
-  const r = await fetch(path, { method: "POST", headers: baseHeaders(), body: JSON.stringify(body) });
+/** Texto do campo "error" da resposta; sem ele, a mensagem original. */
+export const apiErrorMessage = (e: unknown): string => {
+  const message = e instanceof Error ? e.message : String(e);
+  const start = message.indexOf("{");
+  if (start < 0) return message;
+  try {
+    const parsed = JSON.parse(message.slice(start)) as { error?: unknown };
+    return typeof parsed.error === "string" && parsed.error ? parsed.error : message;
+  } catch {
+    return message;
+  }
+};
+
+export const apiPost = async <T>(path: string, body: unknown, signal?: AbortSignal): Promise<T> => {
+  const r = await fetch(path, { method: "POST", headers: baseHeaders(), body: JSON.stringify(body), signal });
   await checkStatus(r, path);
   return r.json() as Promise<T>;
 };

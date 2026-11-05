@@ -1,15 +1,21 @@
 import { useMutation } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { openCall } from "@/lib/webrtc";
-import { startCall } from "@/services/calls";
+import { endCall, startCall } from "@/services/calls";
 import { registerOwnConnection } from "@/stores/calls";
 
 export const useStartCall = (sid: string, micId: string | null) =>
   useMutation({
     mutationFn: async (vars: { phone: string }) => {
       const { call } = await startCall(sid, vars.phone);
-      const conn = await openCall(sid, call.callId, micId);
-      registerOwnConnection(call.callId, conn);
+      try {
+        const conn = await openCall(sid, call.callId, micId);
+        registerOwnConnection(call.callId, conn);
+      } catch (audioErr) {
+        // Sem áudio, o contato atenderia no silêncio.
+        await endCall(sid, call.callId).catch(() => {});
+        throw audioErr;
+      }
       return call.callId;
     },
     onError: (e: Error) => {
