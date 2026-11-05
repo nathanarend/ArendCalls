@@ -46,6 +46,13 @@ export type RecordingConfigPatch = Partial<{
   recordInbound: boolean;
 }>;
 
+// AgentConfig mirrors GET /api/sessions/{sid}/agent-config. A key nunca volta:
+// elevenLabsApiKeySet só diz se existe uma salva.
+export type AgentConfig = {
+  sessionId: string;
+  elevenLabsApiKeySet: boolean;
+};
+
 export type RecordingStatus = "recording" | "uploading" | "ready" | "failed" | "skipped";
 
 export type RecordingItem = {
@@ -69,4 +76,15 @@ export type RecordingsOverview = {
   stats: Partial<Record<RecordingStatus, number>>;
   diskUsageBytes: number;
   recordings: RecordingItem[];
+};
+
+export type AgentTestRequest = {
+  agentId: string;
+  dynamicVariables?: Record<string, unknown>;
+};
+
+export type AgentTestResult = {
+  ok: boolean;
+  conversationId: string;
+  audioFormat: string;
 };

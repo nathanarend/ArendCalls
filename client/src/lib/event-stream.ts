@@ -21,6 +21,7 @@ export type BrokerEvent =
   | { type: "call-list"; calls: CallListRow[] }
   | { type: "call-status"; sessionId: string; id: string; owner: string | null; status: CallStatus; peer: string; peerName?: string; startedAt: number }
   | { type: "call-ended"; sessionId: string; id: string; owner: string | null; reason: string; endedAt: number }
+  | { type: "call-agent"; sessionId: string; id: string; agentId: string; status: "connected" | "failed"; conversationId: string; error: string }
   | { type: "incoming"; sessionId: string; id: string; peer: string; peerName?: string; offeredAt: number }
   | { type: "incoming-claimed"; sessionId: string; id: string; owner: string };
 

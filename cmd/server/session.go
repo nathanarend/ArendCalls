@@ -186,6 +186,11 @@ func (s *Session) wireCall(cm *call.CallManager, callID string) (stopRinging fun
 		// (OnPeerAudio), é o que inicia a gravação — nunca o toque.
 		if c.StateData.State == core.CallStateActive {
 			s.startRecordingIfArmed(c.CallID)
+			if leg, ok := s.reg.bridgeOf(c.CallID); ok {
+				if agent, ok := leg.(*AgentLeg); ok {
+					agent.Answer()
+				}
+			}
 		}
 		dir := "outbound"
 		if c.Direction == core.CallDirectionIncoming {

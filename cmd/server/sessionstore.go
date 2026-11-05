@@ -26,7 +26,8 @@ func newSessionStore(ctx context.Context, db *sql.DB) (*sessionStore, error) {
 		name TEXT NOT NULL,
 		jid  TEXT,
 		webhook_url TEXT,
-		panel_inbound INTEGER DEFAULT 0
+		panel_inbound INTEGER DEFAULT 0,
+		elevenlabs_api_key_enc TEXT
 	)`)
 	if err != nil {
 		return nil, err
@@ -34,6 +35,7 @@ func newSessionStore(ctx context.Context, db *sql.DB) (*sessionStore, error) {
 	// Add columns if they don't exist (for existing DBs).
 	db.ExecContext(ctx, `ALTER TABLE sessions ADD COLUMN webhook_url TEXT`)
 	db.ExecContext(ctx, `ALTER TABLE sessions ADD COLUMN panel_inbound INTEGER DEFAULT 0`)
+	db.ExecContext(ctx, `ALTER TABLE sessions ADD COLUMN elevenlabs_api_key_enc TEXT`)
 
 	// Global switch: does the panel show incoming calls at all. Default on.
 	_, err = db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS panel_settings (
@@ -127,5 +129,27 @@ func (s *sessionStore) setPanelInbound(ctx context.Context, id string, enabled b
 		v = 1
 	}
 	_, err := s.db.ExecContext(ctx, `UPDATE sessions SET panel_inbound = ? WHERE id = ?`, v, id)
+	return err
+}
+
+// elevenLabsAPIKey devolve a key da ElevenLabs da conta ("" = não configurada).
+func (s *sessionStore) elevenLabsAPIKey(ctx context.Context, id string, dec secretDecryptor) (string, error) {
+	var stored string
+	err := s.db.QueryRowContext(ctx, `SELECT COALESCE(elevenlabs_api_key_enc, '') FROM sessions WHERE id = ?`, id).Scan(&stored)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return dec.Decrypt(stored)
+}
+
+func (s *sessionStore) setElevenLabsAPIKey(ctx context.Context, id, key string, enc secretEncryptor) error {
+	stored, err := enc.Encrypt(key)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.ExecContext(ctx, `UPDATE sessions SET elevenlabs_api_key_enc = ? WHERE id = ?`, stored, id)
 	return err
 }

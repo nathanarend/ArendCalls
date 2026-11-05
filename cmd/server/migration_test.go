@@ -119,6 +119,9 @@ func seedSource(t *testing.T, n *migNode) (deviceJID types.JID, wav []byte) {
 		}
 	}
 
+	if err := n.srv.sessions.store.setElevenLabsAPIKey(ctx, "aaaa", "xi-secret", n.srv.rec.secrets); err != nil {
+		t.Fatal(err)
+	}
 	if err := n.srv.recStore.saveConfig(ctx, RecordingConfig{
 		SessionID: "aaaa", B2Endpoint: "https://b2", B2Bucket: "bk", B2KeyID: "kid", B2AppKey: "app-secret",
 		WebhookURL: "https://hook", WebhookSecret: "hmac-secret",
@@ -213,6 +216,14 @@ func TestMigrationCloneEndToEnd(t *testing.T) {
 	_ = b.srv.db.QueryRow(`SELECT b2_app_key_enc FROM recording_config WHERE session_id='aaaa'`).Scan(&raw)
 	if !strings.HasPrefix(raw, encPrefix) {
 		t.Fatalf("segredo em B deveria estar cifrado: %q", raw)
+	}
+
+	if key, err := b.srv.sessions.store.elevenLabsAPIKey(ctx, "aaaa", b.srv.rec.secrets); err != nil || key != "xi-secret" {
+		t.Fatalf("API key do agente em B: %q %v", key, err)
+	}
+	_ = b.srv.db.QueryRow(`SELECT elevenlabs_api_key_enc FROM sessions WHERE id='aaaa'`).Scan(&raw)
+	if !strings.HasPrefix(raw, encPrefix) {
+		t.Fatalf("API key em B deveria estar cifrada: %q", raw)
 	}
 
 	row, err := b.srv.recStore.get(ctx, "CALL1")

@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { ChevronDown, ChevronUp, Copy } from "lucide-react";
 import { toast } from "sonner";
-import { adminRoutes, sessionRoutes, recordingRoutes, RouteInfo } from "@/constants/api-routes";
+import { adminRoutes, sessionRoutes, agentRoutes, recordingRoutes, RouteInfo } from "@/constants/api-routes";
 
 export const ApiDocs = () => {
   const [expandedIndex, setExpandedIndex] = useState<string | null>(null);
@@ -212,6 +212,84 @@ export const ApiDocs = () => {
         </div>
 
         <div className="mt-8 space-y-4 pt-6 border-t">
+          <h2 className="text-xl font-bold text-foreground">4. Agente de Voz (ElevenLabs)</h2>
+          <p className="text-sm text-muted-foreground">
+            Com o campo <code>agent</code> no <code>POST /api/sessions/{'{sid}'}/calls</code>, o ArendCalls disca e, quando o contato atende,
+            um agente da ElevenLabs conversa com ele no lugar do atendente. Sem o campo, a chamada segue igual, com atendente no painel.
+          </p>
+          <ul className="list-disc pl-5 text-sm text-muted-foreground space-y-1.5">
+            <li><strong>API key:</strong> por conta, no painel (engrenagem da conta → aba Agente) ou pela rota <code>PATCH .../agent-config</code>. Nunca é devolvida.</li>
+            <li><strong>Agente:</strong> escolhido por chamada, pelo <code>agentId</code> (trecho <code>agent_...</code> da URL do agente na ElevenLabs). Nada fica salvo no ArendCalls.</li>
+            <li><strong>Formato:</strong> o agente precisa estar em <strong>PCM 16 kHz</strong> na entrada e na saída; em outro formato, a conversa falha logo após o atendimento.</li>
+            <li><strong>Antes de discar:</strong> o ArendCalls valida a key e o agente. Erro aqui volta na resposta do <code>POST</code> e ninguém é chamado. Toque sem resposta não gera conversa nem gasta créditos.</li>
+            <li><strong>Durante:</strong> fala do contato por cima corta a fala do agente. Quando o agente encerra, a ligação termina depois da fala em andamento. Conectar o áudio pelo painel encerra o agente e mantém a ligação.</li>
+            <li><strong>Gravação:</strong> com <code>record: true</code>, o agente fica no canal do atendente.</li>
+            <li><strong>Uma chamada por número:</strong> com chamada de saída ativa para o mesmo número na conta, o <code>POST</code> responde <code>409</code> com o <code>callId</code> existente e não disca.</li>
+            <li>Não envie <code>X-Client-Id</code> de um backend: ele identifica um atendente do painel, e um atendente só pode estar em uma chamada (também <code>409</code>).</li>
+            <li>Limites: só chamadas de saída têm agente; em espera (<code>/hold</code>) o contato não ouve o agente.</li>
+          </ul>
+          <div className="bg-muted/60 p-4 rounded-xl border border-border space-y-2 font-mono text-xs">
+            <span className="text-muted-foreground font-semibold uppercase block">Corpo do POST /calls com agente:</span>
+            <pre className="text-foreground overflow-x-auto whitespace-pre">{JSON.stringify({
+              phone: "5511999999999",
+              agent: { agentId: "agent_xxx", dynamicVariables: { nome: "Maria" } },
+            }, null, 2)}</pre>
+          </div>
+          <p className="text-sm text-muted-foreground">
+            <code>dynamicVariables</code> é opcional e preenche <code>{'{{nome}}'}</code> no prompt do agente.
+          </p>
+          <div className="rounded-md border bg-card overflow-hidden">
+            <table className="w-full text-sm text-left">
+              <thead className="bg-muted text-muted-foreground">
+                <tr>
+                  <th className="px-4 py-2 font-medium w-[80px]">Status</th>
+                  <th className="px-4 py-2 font-medium">Quando</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border text-muted-foreground">
+                {[
+                  ["400", "Falta phone ou agent.agentId, key não configurada, ou ligação para o próprio número"],
+                  ["401", "API key do ArendCalls errada"],
+                  ["404", "Conta inexistente ou número sem WhatsApp"],
+                  ["409", "Já há chamada de saída ativa para o número nesta conta"],
+                  ["429", "Limite de chamadas simultâneas por conta (-max-calls no servidor)"],
+                  ["500", "Falha ao verificar o número ou ao discar"],
+                  ["502", "ElevenLabs recusou a key ou o agente, ou está indisponível; não discou"],
+                  ["503", "Conta sem pareamento"],
+                ].map(([code, text]) => (
+                  <tr key={code}>
+                    <td className="px-4 py-2 font-mono text-xs text-foreground">{code}</td>
+                    <td className="px-4 py-2">{text}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p className="text-sm text-muted-foreground">
+            Acompanhe pelo SSE ou pelo webhook da conta. O evento <code>call-agent</code> informa a conversa com o agente:
+          </p>
+          <div className="bg-muted/60 p-4 rounded-xl border border-border space-y-2 font-mono text-xs">
+            <span className="text-muted-foreground font-semibold uppercase block">Evento call-agent:</span>
+            <pre className="text-foreground overflow-x-auto whitespace-pre">{JSON.stringify({
+              type: "call-agent",
+              sessionId: "SUA_SESSION_ID",
+              id: "1A2B3C...",
+              agentId: "agent_xxx",
+              status: "connected",
+              conversationId: "conv_xxx",
+              error: "",
+            }, null, 2)}</pre>
+          </div>
+          <ul className="list-disc pl-5 text-sm text-muted-foreground space-y-1.5">
+            <li><code>status</code>: <code>connected</code> (contato atendeu e a conversa abriu) ou <code>failed</code> (motivo em <code>error</code>).</li>
+            <li><code>id</code> é o <code>callId</code> devolvido no <code>POST</code>. O fim da ligação chega em <code>call-ended</code>, com <code>reason</code>.</li>
+            <li><code>conversationId</code> liga a chamada à conversa na ElevenLabs, que entrega transcrição e análise pelo post-call webhook dela.</li>
+            <li>Para testar sem ligar, use <code>POST .../agent-test</code> (ou "Verificar conexão" na aba Agente). O teste vira uma conversa curta no histórico da ElevenLabs e gasta poucos créditos.</li>
+          </ul>
+          {renderTable(agentRoutes, "agent")}
+        </div>
+
+        <div className="mt-8 space-y-4 pt-6 border-t">
           <h2 className="text-xl font-semibold">Webhooks Ativos (Alternativa ao SSE)</h2>
           <p className="text-sm text-muted-foreground">
             Caso você não possa manter uma conexão contínua de SSE no seu backend, o ArendCalls pode "empurrar" os eventos ativamente para você.
@@ -221,6 +299,12 @@ export const ApiDocs = () => {
             <li><strong>Interface Visual:</strong> Clique na <strong>Engrenagem</strong> ao lado do nome da conta na barra lateral e cole sua URL no campo de Webhook.</li>
             <li><strong>Via API REST:</strong> Use a rota <code>PATCH /api/sessions/{'{sid}'}/webhook</code> descrita acima se preferir configurar a URL programaticamente pelo seu sistema.</li>
           </ul>
+          <p className="text-sm text-muted-foreground">
+            O webhook recebe os eventos da conta, no mesmo formato do SSE: <code>call-status</code> (<code>starting</code>, <code>ringing</code>,
+            <code> connected</code>), <code>call-agent</code> e <code>call-ended</code> (<code>reason</code>: <code>user_ended</code>, <code>declined</code>,
+            <code> timeout</code>, <code>busy</code>, <code>cancelled</code>, <code>failed</code>, <code>do_not_disturb</code>, <code>unknown</code>), entre outros.
+            O envio não é assinado nem reenviado em caso de falha: use um token secreto na URL e reconcilie por <code>GET /api/sessions/{'{sid}'}/history</code>.
+          </p>
         </div>
 
         <div className="mt-8 space-y-4 pt-6 border-t">
@@ -245,7 +329,7 @@ export const ApiDocs = () => {
               assumiu, ex.: retomada após espera). Outra queda é anormal: o servidor espera <strong>15 s</strong> por uma reconexão (com ticket
               novo) antes de encerrar a chamada; em espera, não encerra. Ping a cada 20 s.
             </li>
-            <li>No painel, a escolha fica em <strong>Configurações do Painel → Transporte de áudio</strong> (por navegador, padrão WebRTC).</li>
+            <li>No painel, a escolha fica em <strong>Configurações do Painel → Transporte de áudio</strong> (por navegador; o padrão Automático tenta WebRTC e cai para WebSocket).</li>
           </ul>
         </div>
 

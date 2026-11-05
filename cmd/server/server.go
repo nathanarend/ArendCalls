@@ -33,7 +33,9 @@ type server struct {
 	mig       *migrator
 	tickets   *audioTickets
 	prebuffer audioPrebuffer
-	startTime time.Time
+	// agentAPIBase troca a API da ElevenLabs nos testes; vazio = produção.
+	agentAPIBase string
+	startTime    time.Time
 }
 
 func openDB(dbPath string) (*sql.DB, error) {

@@ -11,9 +11,9 @@ import (
 	"go.mau.fi/whatsmeow/types"
 )
 
-// browserLeg é a perna navegador ↔ servidor de uma chamada: WebRTC
-// (DataChannel, Bridge) ou WebSocket (WSBridge). O núcleo da chamada só vê PCM
-// float32.
+// browserLeg é a perna que fala com o contato: navegador por WebRTC (DataChannel,
+// Bridge) ou WebSocket (WSBridge), ou agente de voz (AgentLeg). O núcleo da
+// chamada só vê PCM float32.
 type browserLeg interface {
 	WritePCM(pcm []float32) error
 	// Detach desliga os callbacks de queda antes do Close, para a troca de
@@ -67,10 +67,52 @@ func (ac *activeCall) audioStats() callAudioStats {
 type callRegistry struct {
 	mu    sync.Mutex
 	calls map[string]*activeCall
+	// dialed: número → chamada de saída em andamento. "" = discagem em preparo.
+	// Chave é o número porque a chamada guarda o LID do contato, e quem disca só
+	// conhece o número.
+	dialed map[string]string
 }
 
 func newCallRegistry() *callRegistry {
-	return &callRegistry{calls: map[string]*activeCall{}}
+	return &callRegistry{calls: map[string]*activeCall{}, dialed: map[string]string{}}
+}
+
+// reservePeer garante uma só chamada de saída por número, mesmo com pedidos
+// simultâneos. ok=false: já existe; callID vazio = a outra ainda está discando.
+func (r *callRegistry) reservePeer(number string) (callID string, ok bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if id, busy := r.dialed[number]; busy {
+		return id, false
+	}
+	r.dialed[number] = ""
+	return "", true
+}
+
+func (r *callRegistry) releasePeer(number string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.dialed, number)
+}
+
+// bindPeer liga a reserva à chamada criada. A chamada pode já ter acabado (falha
+// logo ao discar): sem isso a reserva ficaria presa e bloquearia o número.
+func (r *callRegistry) bindPeer(number, callID string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, alive := r.calls[callID]; !alive {
+		delete(r.dialed, number)
+		return
+	}
+	r.dialed[number] = callID
+}
+
+func (r *callRegistry) forgetDialed(callID string) {
+	for number, id := range r.dialed {
+		if id == callID {
+			delete(r.dialed, number)
+		}
+	}
 }
 
 func (r *callRegistry) add(callID string, ac *activeCall) {
@@ -108,6 +150,7 @@ func (r *callRegistry) remove(callID string) (*activeCall, bool) {
 		return nil, false
 	}
 	delete(r.calls, callID)
+	r.forgetDialed(callID)
 	return ac, true
 }
 
@@ -148,5 +191,6 @@ func (r *callRegistry) drain() []*activeCall {
 		out = append(out, ac)
 	}
 	r.calls = map[string]*activeCall{}
+	r.dialed = map[string]string{}
 	return out
 }

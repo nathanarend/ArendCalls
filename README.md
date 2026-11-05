@@ -54,6 +54,7 @@ Este repositório (`ArendCalls`) traz diversas melhorias de engenharia e usabili
 | 🤝 **Paralelo com WAHA Sem Interferência** | Opera simultaneamente com o WAHA no mesmo número de WhatsApp. O WAHA cuida das mensagens/mídias e o ArendCalls cuida das ligações de voz. |
 | 🟢 **Keepalive Anti-Desconexão & Presença** | Pulso de presença (30s available, depois unavailable) ao conectar, ao parear (quando o pushname chega) e no worker diário: atualiza a última atividade em "Dispositivos conectados" e evita a expiração de 14 dias dos companion devices. Totalmente invisível para contatos (não exibe "online" nos chats). Endpoint manual dedicado `POST /api/sessions/{sid}/presence`. |
 | 🎙️ **Gravação no Servidor** | O ArendCalls grava a chamada (WAV estéreo, atendente/cliente separados), sobe para o Backblaze B2 e avisa por webhook assinado (HMAC). O navegador do atendente não grava nem sobe áudio. Ativação por chamada. |
+| 🤖 **Agente de Voz (ElevenLabs)** | Uma chamada de saída pode ser atendida por um agente ElevenLabs em vez de uma pessoa no navegador: basta enviar `agent` no `POST /calls`. API key por conta, cifrada. [Detalhes](#agente-voz). |
 | 📴 **Controle de Chamadas Recebidas no Painel** | Interruptor global para o painel exibir (ou não) chamadas recebidas, com override por conta. Permite usar o painel como console administrativo enquanto SSE/webhooks seguem disparando. |
 | ⏸️ **Modo Espera (Hold) Integrado** | Botão no painel de chamada para colocar o cliente em espera reproduzindo áudio de espera sem encerrar a ligação. |
 | ⚡ **Codec MLow Otimizado** | Encode ~2,7× mais rápido (memoização de twiddles do FFT, pool de scratch da busca CELP) — saída de áudio byte a byte idêntica, mais chamadas simultâneas por VPS. |
@@ -364,7 +365,7 @@ Todas as rotas de API exigem autenticação (ver [Segurança](#seguranca)).
 
 | Método | Rota | Finalidade |
 |---|---|---|
-| `POST` | `/api/sessions/{sid}/calls` | Iniciar chamada de voz — `{ phone, record?, clinicId?, duration_ms? }` |
+| `POST` | `/api/sessions/{sid}/calls` | Iniciar chamada de voz — `{ phone, record?, clinicId?, duration_ms?, agent? }` ([agente de voz](#agente-voz)) |
 | `POST` | `/api/sessions/{sid}/calls/{id}/webrtc` | Trocar SDP do WebRTC para streaming de áudio |
 | `POST` | `/api/sessions/{sid}/calls/{id}/audio-ticket` | Ticket de uso único (30 s) para o navegador abrir o WebSocket de áudio sem a API key — ver [Transporte de áudio](#transporte-audio) |
 | `GET` | `/api/sessions/{sid}/calls/{id}/audio` | WebSocket de áudio, alternativa ao `/webrtc` que funciona atrás de proxy/tunnel |
@@ -386,6 +387,8 @@ Todas as rotas de API exigem autenticação (ver [Segurança](#seguranca)).
 
 | Método | Rota | Finalidade |
 |---|---|---|
+| `GET` · `PATCH` | `/api/sessions/{sid}/agent-config` | Ler/definir a API key da ElevenLabs da conta (`elevenLabsApiKey`; nunca é retornada) |
+| `POST` | `/api/sessions/{sid}/agent-test` | Conferir key, agente e formato de áudio sem ligar — `{ agentId, dynamicVariables? }` |
 | `GET` · `PATCH` | `/api/panel-settings` | Interruptor global "exibir chamadas recebidas no painel" |
 | `PATCH` | `/api/sessions/{sid}/panel-inbound` | Override por conta: forçar exibição da chamada recebida dessa conta |
 | `GET` | `/api/system/metrics` | Telemetria sob demanda da VPS e ArendCalls (RAM, CPU, uptime, disco) |
@@ -471,6 +474,55 @@ Retry com backoff (1 min / 5 min / 15 min / 1 h) persistido e retomado no boot;
 
 ---
 
+<a id="agente-voz"></a>
+## 🤖 Agente de Voz (ElevenLabs)
+
+Em vez de uma pessoa no navegador, um **agente ElevenLabs** fala com o contato. O áudio
+vai direto do servidor para a API WebSocket do agente, sem SIP nem canal adicional na
+ElevenLabs. Chamadas sem `agent` continuam iguais.
+
+**Configuração**
+1. Na ElevenLabs, configure o agente com **PCM 16 kHz** na entrada e na saída. Com outro
+   formato, a chamada é encerrada logo após o atendimento e o evento `call-agent` traz o motivo.
+2. No painel, em **Configurações da conta → Agente de Voz**, salve a API key (ou use
+   `PATCH /api/sessions/{sid}/agent-config`). Cada conta tem a sua. Defina
+   `RECORDING_CONFIG_KEY` para ela ser cifrada no banco.
+
+**Iniciar a chamada**
+```bash
+curl -X POST https://seu-servidor/api/sessions/{sid}/calls \
+  -H "X-Api-Key: $API_KEY" -H "Content-Type: application/json" \
+  -d '{
+    "phone": "5511999999999",
+    "agent": {
+      "agentId": "agent_xxx",
+      "dynamicVariables": { "nome": "Maria", "anuncio": "Implante" }
+    }
+  }'
+```
+`dynamicVariables` preenche as variáveis `{{nome}}` do prompt do agente. Erro de
+configuração (`400`) ou falha na ElevenLabs (`502`) retorna antes de discar: o contato não recebe ligação.
+Se já houver chamada de saída ativa para o número nesta conta, a resposta é `409`, com o
+`callId` existente, e nada é discado. Isso vale para qualquer chamada, com ou sem agente.
+
+**Testar a integração**
+
+Em **Configurações da conta → Agente**, informe o Agent ID e escolha:
+- **Verificar conexão** (`POST /api/sessions/{sid}/agent-test`): confere key, agente e formato de
+  áudio sem ligar. Fica como uma conversa curta no histórico da ElevenLabs.
+- **Ligar**: ligação real para o número informado, com o andamento na tela. Consome créditos.
+
+**Comportamento**
+- A conversa com o agente só abre no **atendimento**. Toque sem resposta não gera conversa.
+- O evento `call-agent` (SSE e webhook da conta) informa `status` (`connected` ou `failed`),
+  `conversationId` e `error`. Use `conversationId` para cruzar com o post-call webhook da ElevenLabs.
+- Quando o agente encerra a conversa, a ligação termina depois do fim da fala em andamento.
+- Com `record: true`, o agente fica no canal do atendente do WAV.
+- Conectar o áudio pelo painel (`/webrtc` ou `/audio`) encerra o agente e passa a ligação à pessoa.
+- Chamadas recebidas ainda não têm agente. Em espera (`/hold`), o contato não ouve o agente.
+
+---
+
 <a id="painel-inbound"></a>
 ## 📴 Chamadas Recebidas no Painel
 
@@ -500,8 +552,11 @@ servidor oferece os dois sempre, e nada no resto da API muda.
 | Rede | UDP direto até o servidor (50000-50100) | HTTP/WebSocket: passa por proxy e Cloudflare Tunnel |
 | Quando usar | Servidor com IP público | Servidor atrás de NAT/tunnel, sem UDP de entrada |
 
-O painel usa WebRTC por padrão; a escolha fica em **Configurações do Painel →
-Transporte de áudio** e vale para aquele navegador.
+O painel usa **Automático** por padrão: tenta WebRTC e, se o DataChannel não abrir em
+4 s, conecta por WebSocket sem encerrar a chamada. Depois de um fallback, as próximas
+chamadas desse navegador começam pelo WebSocket por 30 min. A queda no meio da chamada
+não troca de transporte. Para fixar um deles, use **Configurações do Painel →
+Transporte de áudio**; vale para aquele navegador.
 
 **Autenticação do WebSocket**, nesta ordem:
 1. `?ticket=` — para clientes de outra origem (um CRM). O backend do cliente chama

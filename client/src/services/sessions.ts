@@ -1,6 +1,6 @@
 import { apiGet, apiPost, apiPatch, apiDelete, checkStatus } from "@/lib/api";
 import { getClientId } from "@/lib/client-id";
-import type { SessionInfo, RecordingConfig, RecordingConfigPatch, RecordingsOverview } from "@/types/session";
+import type { SessionInfo, AgentConfig, AgentTestRequest, AgentTestResult, RecordingConfig, RecordingConfigPatch, RecordingsOverview } from "@/types/session";
 
 export const listSessions = () =>
   apiGet<{ sessions: SessionInfo[] }>("/api/sessions").then((r) => r.sessions ?? []);
@@ -32,6 +32,12 @@ export const getRecordingConfig = (id: string) =>
 export const updateRecordingConfig = (id: string, patch: RecordingConfigPatch) =>
   apiPatch<RecordingConfig>(`/api/sessions/${id}/recording-config`, patch);
 
+export const getAgentConfig = (id: string) =>
+  apiGet<AgentConfig>(`/api/sessions/${id}/agent-config`);
+
+export const updateAgentConfig = (id: string, patch: { elevenLabsApiKey: string }) =>
+  apiPatch<AgentConfig>(`/api/sessions/${id}/agent-config`, patch);
+
 export const listRecordings = (id: string) =>
   apiGet<RecordingsOverview>(`/api/sessions/${id}/recordings`);
 
@@ -55,3 +61,6 @@ export const startSession = (id: string) => postVoid(`/api/sessions/${id}/start`
 export const stopSession = (id: string) => postVoid(`/api/sessions/${id}/stop`);
 
 export const restartSession = (id: string) => postVoid(`/api/sessions/${id}/restart`);
+
+export const testAgent = (sid: string, agent: AgentTestRequest) =>
+  apiPost<AgentTestResult>(`/api/sessions/${sid}/agent-test`, agent);

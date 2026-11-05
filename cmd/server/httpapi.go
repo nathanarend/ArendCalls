@@ -50,6 +50,9 @@ func (s *server) routes() http.Handler {
 	mux.HandleFunc("POST /api/sessions/{sid}/check-number", s.handleCheckNumber)
 	mux.HandleFunc("GET /api/sessions/{sid}/recording-config", s.handleGetRecordingConfig)
 	mux.HandleFunc("PATCH /api/sessions/{sid}/recording-config", s.handleSetRecordingConfig)
+	mux.HandleFunc("GET /api/sessions/{sid}/agent-config", s.handleGetAgentConfig)
+	mux.HandleFunc("PATCH /api/sessions/{sid}/agent-config", s.handleSetAgentConfig)
+	mux.HandleFunc("POST /api/sessions/{sid}/agent-test", s.handleAgentTest)
 	mux.HandleFunc("GET /api/sessions/{sid}/recordings", s.handleListRecordings)
 	mux.HandleFunc("GET /api/sessions/{sid}/calls/{id}/recording-info", s.handleRecordingInfo)
 
@@ -447,6 +450,8 @@ func (s *server) doStartCall(sess *Session, w http.ResponseWriter, r *http.Reque
 		DurationMs int    `json:"duration_ms"`
 		Record     bool   `json:"record"`
 		ClinicID   string `json:"clinicId"`
+		// Agent: um agente ElevenLabs atende no lugar do navegador.
+		Agent *agentCallConfig `json:"agent"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || strings.TrimSpace(body.Phone) == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "phone required"})
@@ -489,10 +494,40 @@ func (s *server) doStartCall(sess *Session, w http.ResponseWriter, r *http.Reque
 		}
 	}
 
+	// Antes de preparar o agente: pedido repetido (retry após timeout) não pode
+	// virar uma segunda ligação para o mesmo contato.
+	number := peer.ToNonAD().User
+	if existing, ok := sess.reg.reservePeer(number); !ok {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "já existe uma chamada ativa para este número", "callId": existing})
+		return
+	}
+	dialing := false
+	defer func() {
+		if !dialing {
+			sess.reg.releasePeer(number)
+		}
+	}()
+
+	var agentURL string
+	if body.Agent != nil {
+		var err error
+		if agentURL, err = s.prepareAgent(r.Context(), sess.id, body.Agent); err != nil {
+			var se *agentSetupError
+			errors.As(err, &se)
+			writeJSON(w, se.status, map[string]string{"error": se.msg})
+			return
+		}
+	}
+
 	callID, err := sess.startOutgoing(r.Context(), peer, false)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
+	}
+	dialing = true
+	sess.reg.bindPeer(number, callID)
+	if body.Agent != nil {
+		s.attachAgent(sess, callID, agentURL, *body.Agent)
 	}
 	if body.Record && sess.mgr.rec != nil {
 		sess.mgr.rec.arm(recMeta{

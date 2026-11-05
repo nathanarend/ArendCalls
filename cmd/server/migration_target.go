@@ -423,7 +423,7 @@ func (m *migrator) prepareSnapshot(ctx context.Context, path string, mf *migrati
 		}
 		return box.Encrypt(v)
 	}); err != nil {
-		return fmt.Errorf("recifrar segredos de gravação: %w", err)
+		return fmt.Errorf("recifrar segredos das contas: %w", err)
 	}
 
 	for _, f := range mf.Files {

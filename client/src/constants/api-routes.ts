@@ -26,7 +26,7 @@ export const adminRoutes: RouteInfo[] = [
 
 export const sessionRoutes: RouteInfo[] = [
   { method: "PATCH", path: "/api/sessions/{sid}", purpose: "Renomear uma conta existente", payload: { name: "Novo Nome da Conta" }, requiresSid: true },
-  { method: "PATCH", path: "/api/sessions/{sid}/webhook", purpose: "Definir URL de Webhook de eventos (Ringing/Accepted/Terminated) específica desta conta", payload: { webhook_url: "https://seu-crm.com/api/webhook" }, requiresSid: true },
+  { method: "PATCH", path: "/api/sessions/{sid}/webhook", purpose: "Definir a URL de webhook desta conta: recebe por POST os mesmos eventos do SSE que têm sessionId (call-status, call-agent, call-ended, incoming...). Sem assinatura e sem reenvio", payload: { webhook_url: "https://seu-crm.com/api/webhook" }, requiresSid: true },
   { method: "PATCH", path: "/api/sessions/{sid}/panel-inbound", purpose: "Override por conta: força mostrar as chamadas recebidas desta conta no painel mesmo com o switch global desligado (bypass de teste). Nunca esconde — quem esconde é o switch global (/api/panel-settings). OU lógico: global OU override.", payload: { enabled: true }, response: { status: "ok", panelInbound: true }, requiresSid: true },
   { method: "DELETE", path: "/api/sessions/{sid}", purpose: "Fazer logout e remover uma conta", requiresSid: true },
   { method: "POST", path: "/api/sessions/{sid}/logout", purpose: "Desconectar uma conta (manter para re-parear)", requiresSid: true },
@@ -43,8 +43,8 @@ export const sessionRoutes: RouteInfo[] = [
     method: "POST",
     path: "/api/sessions/{sid}/calls",
     purpose:
-      "Iniciar uma chamada de saída. record: true liga a gravação no servidor desta chamada (exige a config de gravação da conta completa — ver seção 3). clinicId define a pasta {clinicId} na chave do bucket.",
-    payload: { phone: "5511999999999", duration_ms: 30000, record: true, clinicId: "clinica-123" },
+      "Iniciar uma chamada de saída. record: true liga a gravação no servidor desta chamada (exige a config de gravação da conta completa — ver seção 3). clinicId define a pasta {clinicId} na chave do bucket. agent (opcional): um agente ElevenLabs fala com o contato no lugar do navegador, a partir do atendimento; exige a API key em agent-config e o agente em PCM 16 kHz (ver seção 4). Se já houver chamada de saída ativa para o número nesta conta, responde 409 e não disca.",
+    payload: { phone: "5511999999999", duration_ms: 30000, record: true, clinicId: "clinica-123", agent: { agentId: "agent_xxx", dynamicVariables: { nome: "Maria" } } },
     response: { call: { callId: "1A2B3C..." } },
     requiresSid: true,
   },
@@ -78,6 +78,26 @@ export const sessionRoutes: RouteInfo[] = [
   { method: "POST", path: "/api/sessions/{sid}/check-number", purpose: "Verifica se números de telefone (internacional) possuem WhatsApp", payload: { numbers: ["+5511999999999"] }, requiresSid: true },
   { method: "GET", path: "/api/sessions/{sid}/history", purpose: "Histórico recente de chamadas (até 50 registros)", requiresSid: true },
   { method: "GET", path: "/api/sessions/{sid}/events", purpose: "Eventos Server-Sent (SSE) exclusivos desta conta", requiresSid: true },
+];
+
+export const agentRoutes: RouteInfo[] = [
+  { method: "GET", path: "/api/sessions/{sid}/agent-config", purpose: "Informar se a conta tem API key da ElevenLabs configurada", response: { sessionId: "SUA_SESSION_ID", elevenLabsApiKeySet: true }, requiresSid: true },
+  {
+    method: "PATCH",
+    path: "/api/sessions/{sid}/agent-config",
+    purpose: "API key da ElevenLabs desta conta, usada nas chamadas com agente. Cifrada no banco com RECORDING_CONFIG_KEY; nunca é retornada. Omitir o campo mantém o valor; \"\" apaga.",
+    payload: { elevenLabsApiKey: "sk_..." },
+    response: { sessionId: "SUA_SESSION_ID", elevenLabsApiKeySet: true },
+    requiresSid: true,
+  },
+  {
+    method: "POST",
+    path: "/api/sessions/{sid}/agent-test",
+    purpose: "Confere a API key, o agente e o formato de áudio sem ligar para ninguém. Fica como uma conversa curta no histórico da ElevenLabs.",
+    payload: { agentId: "agent_xxx", dynamicVariables: { nome: "Maria" } },
+    response: { ok: true, conversationId: "conv_xxx", audioFormat: "pcm_16000" },
+    requiresSid: true,
+  },
 ];
 
 export const recordingRoutes: RouteInfo[] = [

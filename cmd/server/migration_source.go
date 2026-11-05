@@ -231,8 +231,47 @@ func decryptSecretsForTransfer(ctx context.Context, db *sql.DB, box *secretBox, 
 	})
 }
 
-// rewriteSecrets aplica fn aos segredos cifrados de recording_config.
+// rewriteSecrets aplica fn aos segredos cifrados das contas: API key do agente
+// e destino da gravação.
 func rewriteSecrets(ctx context.Context, db *sql.DB, fn func(sessionID, col, v string) (string, error)) error {
+	if err := rewriteAgentSecrets(ctx, db, fn); err != nil {
+		return err
+	}
+	return rewriteRecordingSecrets(ctx, db, fn)
+}
+
+func rewriteAgentSecrets(ctx context.Context, db *sql.DB, fn func(sessionID, col, v string) (string, error)) error {
+	rows, err := db.QueryContext(ctx, `SELECT id, elevenlabs_api_key_enc FROM sessions WHERE COALESCE(elevenlabs_api_key_enc, '') <> ''`)
+	if err != nil {
+		return err
+	}
+	type rec struct{ id, key string }
+	var list []rec
+	for rows.Next() {
+		var r rec
+		if err := rows.Scan(&r.id, &r.key); err != nil {
+			rows.Close()
+			return err
+		}
+		list = append(list, r)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for _, r := range list {
+		key, err := fn(r.id, "elevenlabs_api_key", r.key)
+		if err != nil {
+			return err
+		}
+		if _, err := db.ExecContext(ctx, `UPDATE sessions SET elevenlabs_api_key_enc=? WHERE id=?`, key, r.id); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func rewriteRecordingSecrets(ctx context.Context, db *sql.DB, fn func(sessionID, col, v string) (string, error)) error {
 	var exists int
 	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='recording_config'`).Scan(&exists); err != nil || exists == 0 {
 		return err

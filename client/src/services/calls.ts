@@ -1,11 +1,15 @@
 import { apiPost, apiDelete, checkStatus } from "@/lib/api";
 import { getClientId } from "@/lib/client-id";
+import type { AgentTestRequest } from "@/types/session";
 
 export const startCall = (sid: string, phone: string) =>
   apiPost<{ call: { callId: string } }>(`/api/sessions/${sid}/calls`, {
     phone,
     duration_ms: 300_000,
   });
+
+export const startAgentCall = (sid: string, phone: string, agent: AgentTestRequest) =>
+  apiPost<{ call: { callId: string } }>(`/api/sessions/${sid}/calls`, { phone, agent });
 
 export const acceptCall = (sid: string, callId: string) =>
   apiPost<{ call: { callId: string } }>(`/api/sessions/${sid}/calls/${callId}/accept`, {});
