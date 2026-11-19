@@ -53,6 +53,35 @@ jobs:
           CGO_ENABLED: "1"
         run: go test -race -count=1 ./...
 
+  # Lançador do Windows (serviço + bandeja): módulo Go próprio em packaging/windows.
+  launcher:
+    name: launcher
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: packaging/windows
+    env:
+      CGO_ENABLED: "0"
+      GOOS: windows
+      GOARCH: amd64
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: packaging/windows/go.mod
+          cache-dependency-path: packaging/windows/go.sum
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Check formatting
+        run: test -z "$(gofmt -l .)"
+
+      - name: Build
+        run: go build ./...
+
   client:
     name: client
     runs-on: ubuntu-latest

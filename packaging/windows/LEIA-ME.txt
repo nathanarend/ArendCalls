@@ -1,0 +1,75 @@
+ARENDCALLS - Windows 10+ / Windows Server 2016+ (64 bits)
+Versao {{VERSAO}}
+
+INSTALAR
+  1. Extraia esta pasta para um local fixo, por exemplo C:\ArendCalls
+     (nao rode de dentro do .zip nem da pasta Downloads).
+  2. De duplo clique em ArendCalls.exe.
+  3. Responda "Sim" para instalar e confirme a permissao de administrador.
+
+  Pronto. O servidor:
+    - inicia junto com o Windows, mesmo sem ninguem logado;
+    - reinicia sozinho se cair;
+    - fica com um icone na bandeja (perto do relogio) para cada usuario logado.
+
+  Na instalacao o arquivo .env e criado com uma API_KEY aleatoria, e a pasta
+  passa a ser gravavel so por administradores (o servico roda como SYSTEM;
+  ninguem sem administrador pode trocar os programas ou o .env). Para editar o
+  .env ou extrair uma versao nova, o Windows pede permissao de administrador.
+  Painel: http://localhost:8080 neste computador.
+
+CONFIGURAR (.env)
+  Clique direito no icone > Editar configuracao (.env) (abre o Bloco de Notas
+  como administrador). Salve e use "Reiniciar servidor" para aplicar. Com a
+  API_KEY vazia ou "troque_esta_chave", a API por chave fica desligada.
+    ADDR=127.0.0.1:8080   so neste computador (use com Cloudflare Tunnel)
+    ADDR=:8080            aberto na rede. Depois de mudar o ADDR, rode
+                          "ArendCalls.exe install" de novo: ele libera (ou fecha)
+                          a porta e as chamadas WebRTC (UDP 50000-50100) no firewall.
+  Login do painel (obrigatorio se o painel ficar acessivel pela internet):
+    abra o Prompt de Comando (nao precisa ser administrador) nesta pasta e rode
+      arendcalls-server.exe -hash-password
+    copie o hash para ADMIN_PASSWORD_HASH= e defina ADMIN_USER=admin no .env.
+
+ICONE DA BANDEJA
+  Clique esquerdo: abre o painel no navegador.
+  Clique direito: menu (estado, reiniciar/parar servidor, .env, logs, pasta).
+  Cores: verde = no ar | amarelo = no ar, alguma conta do WhatsApp desconectada
+         vermelho = parado/nao responde | azul = iniciando | cinza = nao instalado
+  "Fechar so o icone" tira da bandeja; o servidor continua rodando.
+  "Encerrar tudo" para o servidor e fecha o icone. Para voltar, de duplo
+  clique em ArendCalls.exe (o servidor sobe de novo sozinho).
+
+ARQUIVOS DESTA PASTA
+  ArendCalls.exe          servico do Windows + icone da bandeja
+  arendcalls-server.exe   servidor (nao abra direto; o servico cuida dele)
+  client\dist\            telas do painel
+  .env                    configuracao (criado na instalacao; tem a API_KEY)
+  wacalls.db              banco: contas do WhatsApp, historico, configuracoes
+  recordings\             gravacoes aguardando envio
+  logs\servidor.log       log do servidor
+  logs\falhas.log         falhas graves do servico (normalmente vazio)
+
+ATUALIZAR
+  Clique direito no icone > Encerrar tudo. Extraia a versao nova por cima desta
+  pasta (o .env, o wacalls.db e as gravacoes nao vem no pacote e ficam como
+  estao) e de duplo clique em ArendCalls.exe.
+  Se mudou a pasta de lugar, abra ArendCalls.exe da pasta nova: ele avisa e
+  oferece atualizar a instalacao (ou rode "ArendCalls.exe install").
+
+  Vindo de uma versao com iniciar.bat: feche a janela do iniciar.bat, extraia
+  por cima (o arendcalls.exe antigo e substituido pelo ArendCalls.exe) e siga
+  INSTALAR. O iniciar.bat antigo pode ser apagado.
+
+LOGS (para suporte)
+  Servidor:  logs\servidor.log nesta pasta (menu do icone > Ver log do servidor)
+  Bandeja:   %LOCALAPPDATA%\ArendCalls\lancador.log
+             (menu do icone > Ver log da bandeja): abertura, instalacao,
+             comandos, avisos mostrados e erros do icone.
+
+DESINSTALAR
+  Duplo clique em desinstalar.bat. Os arquivos ficam; apague a pasta se quiser
+  (o wacalls.db tem as contas do WhatsApp conectadas).
+
+LINHA DE COMANDO (opcional; pedem administrador sozinhos)
+  ArendCalls.exe install | uninstall | start | stop | restart | encerrar

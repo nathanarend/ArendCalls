@@ -6,6 +6,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/http/pprof"
@@ -29,6 +30,7 @@ func main() {
 	recDir := flag.String("recordings-dir", "recordings", "Directory for server-side call recordings")
 	recWorkers := flag.Int("recording-workers", 3, "Concurrent B2 upload workers for call recordings")
 	hashPassword := flag.Bool("hash-password", false, "Read a password from stdin, print its bcrypt hash for ADMIN_PASSWORD_HASH and exit")
+	stdinStop := flag.Bool("exit-on-stdin-close", false, "Shut down gracefully when stdin is closed (used by the Windows service launcher)")
 	flag.Parse()
 
 	if *hashPassword {
@@ -101,6 +103,18 @@ func main() {
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
+	if *stdinStop {
+		// No Windows não há SIGTERM para um processo sem console: o serviço
+		// (ArendCalls.exe) pede o desligamento fechando o stdin. Se o serviço
+		// morrer, o pipe fecha e o servidor também sai limpo. Cópia própria:
+		// "cancel" é reatribuído mais abaixo (shutdownCtx).
+		stop := cancel
+		go func() {
+			_, _ = io.Copy(io.Discard, os.Stdin)
+			log.Info("stdin closed, shutting down")
+			stop()
+		}()
+	}
 
 	srv, err := newServer(ctx, *dbPath, *staticDir, apiKey, *recDir, *maxCalls, *recWorkers, panel, log)
 	if err != nil {

@@ -54,6 +54,28 @@ jobs:
           name: server-${{ matrix.goos }}-${{ matrix.goarch }}
           path: dist/*
 
+  # ArendCalls.exe: serviço do Windows + ícone da bandeja (módulo próprio).
+  launcher:
+    name: launcher (windows/amd64)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: packaging/windows/go.mod
+          cache-dependency-path: packaging/windows/go.sum
+
+      - name: Build
+        run: packaging/windows/build.sh "${GITHUB_REF_NAME}" dist/arendcalls-launcher-windows-amd64.exe
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: launcher-windows-amd64
+          path: dist/*
+
   client:
     name: client
     runs-on: ubuntu-latest
@@ -87,7 +109,7 @@ jobs:
 
   release:
     name: release
-    needs: [server, client]
+    needs: [server, launcher, client]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -98,7 +120,8 @@ jobs:
           path: artifacts
           merge-multiple: true
 
-      # Pacotes "extrair e executar": binário + painel + iniciar + .env.example.
+      # Pacotes "extrair e executar": binário + painel + .env.example; no Windows
+      # também o ArendCalls.exe (serviço + bandeja), no Linux o iniciar.sh.
       - name: Package bundles
         run: packaging/bundle.sh "${GITHUB_REF_NAME}" artifacts artifacts
 

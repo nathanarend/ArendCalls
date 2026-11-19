@@ -35,7 +35,7 @@ Todo o ecossistema VoIP roda **nativamente em puro Go**:
 - **Sem necessidade de CGO, compiladores C ou DLLs externas** (binário estático)
 
 > [!TIP]
-> **Windows sem abrir portas:** rode o `arendcalls.exe` e acesse o painel de qualquer lugar por um endereço `https://` com o **Cloudflare Tunnel**. É o jeito mais fácil: nada de IP fixo, roteador ou certificado. [Passo a passo](#cloudflare-tunnel).
+> **Windows sem abrir portas:** instale com o `ArendCalls.exe` (serviço + ícone na bandeja, sobe sem ninguém logado) e acesse o painel de qualquer lugar por um endereço `https://` com o **Cloudflare Tunnel**. É o jeito mais fácil: nada de IP fixo, roteador ou certificado. [Passo a passo](#cloudflare-tunnel).
 
 > [!TIP]
 > **Compatível em paralelo com WAHA / APIs de Mensagens:**
@@ -179,8 +179,8 @@ por transporte, 0–500 ms, padrões `0` e `60` — ver [Pré-buffer](#prebuffer
 
 ### 📦 Pacote pronto (Windows e Linux): extrair e executar
 
-Cada release traz um pacote com o binário, o painel já compilado, o script
-`iniciar` e um `.env.example`:
+Cada release traz um pacote com o servidor, o painel já compilado e um `.env.example`
+(no Windows também o `ArendCalls.exe`, no Linux o `iniciar.sh`):
 
 | Sistema | Arquivo |
 | --- | --- |
@@ -188,59 +188,87 @@ Cada release traz um pacote com o binário, o painel já compilado, o script
 | Linux x64 | `arendcalls-<versão>-linux-amd64.tar.gz` |
 | Linux ARM64 | `arendcalls-<versão>-linux-arm64.tar.gz` |
 
+**Windows:** veja [Windows: serviço + ícone na bandeja](#windows) logo abaixo.
+
+**Linux:**
+
 1. Baixe na [página de Releases](https://github.com/nathanarend/ArendCalls/releases) e extraia.
-2. Rode o `iniciar.bat` (Windows, duplo clique) ou `./iniciar.sh` (Linux). Na primeira
-   vez ele cria o `.env` a partir do `.env.example` e para; preencha `API_KEY` e o login
-   do painel (`ADMIN_USER` + `ADMIN_PASSWORD_HASH`, gerado com `arendcalls -hash-password`).
-3. Rode o `iniciar` de novo. O painel abre em `http://127.0.0.1:8080` (mude `ADDR` no
-   `.env` para `:8080` para abrir na rede).
+2. Rode `./iniciar.sh`. Na primeira vez ele cria o `.env` a partir do `.env.example` e
+   para; preencha `API_KEY` e o login do painel (`ADMIN_USER` + `ADMIN_PASSWORD_HASH`,
+   gerado com `./arendcalls -hash-password`).
+3. Rode o `./iniciar.sh` de novo. O painel abre em `http://127.0.0.1:8080` (mude `ADDR`
+   no `.env` para `:8080` para abrir na rede).
 
 O `.env` usa `CHAVE=valor`, sem aspas. Ele não vem no pacote: para atualizar, extraia a
 versão nova por cima da pasta atual e o `.env`, o `wacalls.db` e as gravações ficam como
-estão. No Windows, `CLOUDFLARE_QUICK_TUNNEL=1` no `.env` abre um quick tunnel
-(`trycloudflare.com`) junto; para endereço fixo, veja o [Cloudflare Tunnel](#cloudflare-tunnel).
+estão.
 
-### 🪟 Windows Server (binário nativo)
+<a id="windows"></a>
+### 🪟 Windows: serviço + ícone na bandeja
 
-O mesmo código compila para Windows, sem Docker nem WSL.
+No Windows 10+ e Windows Server 2016+, o pacote instala o ArendCalls como **serviço do
+Windows**: sobe junto com o computador **mesmo sem ninguém logado**, reinicia sozinho se
+cair e mostra um ícone na bandeja de cada usuário logado.
 
-1. Baixe na [página de Releases](https://github.com/nathanarend/ArendCalls/releases) o
-   `wacalls-server-windows-amd64.exe` (renomeie para `arendcalls.exe`) e o
-   `wacalls-client-<versão>.tar.gz`, ou compile a partir do código:
-   ```bash
-   GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o arendcalls.exe ./cmd/server
-   ```
-2. Monte a pasta `C:\arendcalls` com o binário e o frontend (o `tar` já vem no Windows Server 2019+):
-   ```powershell
-   mkdir C:\arendcalls\client\dist
-   tar -xzf wacalls-client-<versão>.tar.gz -C C:\arendcalls\client\dist
-   ```
-3. Libere o firewall (PowerShell como administrador). A faixa UDP é a mídia WebRTC das chamadas:
-   ```powershell
-   New-NetFirewallRule -DisplayName "ArendCalls HTTP" -Direction Inbound -Protocol TCP -LocalPort 8080 -Action Allow
-   New-NetFirewallRule -DisplayName "ArendCalls WebRTC" -Direction Inbound -Protocol UDP -LocalPort 50000-50100 -Action Allow
-   ```
-4. Instale como serviço com o [NSSM](https://nssm.cc/). O NSSM envia Ctrl+C ao parar o
-   serviço, então o servidor encerra as chamadas e o banco de forma limpa:
-   ```powershell
-   nssm install ArendCalls C:\arendcalls\arendcalls.exe -addr :8080 -static C:\arendcalls\client\dist -db C:\arendcalls\wacalls.db -recordings-dir C:\arendcalls\recordings
-   nssm set ArendCalls AppDirectory C:\arendcalls
-   nssm set ArendCalls AppEnvironmentExtra API_KEY=sua_chave_mestra GOGC=200
-   nssm start ArendCalls
-   ```
-5. **Login do painel** (obrigatório se o painel ficar acessível pela internet). Gere o
-   hash da senha e passe-o ao serviço junto com as outras variáveis — o
-   `AppEnvironmentExtra` substitui a lista inteira a cada chamada:
-   ```powershell
-   C:\arendcalls\arendcalls.exe -hash-password
-   # Senha: ********   →  imprime algo como $2a$12$N5ay...
-   nssm set ArendCalls AppEnvironmentExtra API_KEY=sua_chave_mestra GOGC=200 ADMIN_USER=admin 'ADMIN_PASSWORD_HASH=$2a$12$N5ay...'
-   nssm restart ArendCalls
-   ```
-   Use **aspas simples** no PowerShell: com aspas duplas, os `$` do hash viram variáveis.
+1. Extraia o `.zip` num local fixo, por exemplo `C:\ArendCalls` (não rode de dentro do
+   `.zip` nem da pasta Downloads).
+2. Dê duplo clique no **`ArendCalls.exe`**, responda **Sim** para instalar e confirme o
+   pedido de administrador. Na instalação o `.env` é criado com uma `API_KEY` aleatória,
+   e a pasta passa a ser gravável só por administradores e SYSTEM: o serviço roda como
+   SYSTEM, então quem pudesse trocar um `.exe` ou o `.env` dali controlaria o computador.
+3. O painel abre em `http://localhost:8080` (clique esquerdo no ícone da bandeja).
 
-Para um teste rápido, basta dar duplo clique no `arendcalls.exe`: ele encontra o
-`client\dist` ao lado do executável e sobe em `http://localhost:8080`.
+| Arquivo | Para quê |
+| --- | --- |
+| `ArendCalls.exe` | Serviço do Windows + ícone da bandeja |
+| `arendcalls-server.exe` | Servidor (o serviço cuida dele; não abra direto) |
+| `.env` | Configuração, lida a cada início do servidor |
+| `wacalls.db`, `recordings\` | Contas do WhatsApp, histórico, gravações pendentes |
+| `logs\servidor.log` | Log do servidor (gira a cada 10 MB) |
+
+**Ícone da bandeja.** Verde = no ar; amarelo = no ar, mas alguma conta do WhatsApp
+precisa de atenção (deslogada ou esperando QR); vermelho = parado ou sem resposta;
+azul = iniciando; cinza = serviço não instalado. O menu (clique direito) abre o painel,
+reinicia/para o servidor, abre o `.env` no Bloco de Notas, mostra os logs e tem
+**Encerrar tudo** (para o servidor e fecha o ícone; duplo clique no `ArendCalls.exe`
+sobe tudo de novo).
+
+**Configurar.** Menu do ícone → *Editar configuração (.env)* (abre o Bloco de Notas como
+administrador), salve e use *Reiniciar servidor*. Com `API_KEY` vazia ou ainda
+`troque_esta_chave`, o serviço sobe com a API por chave desligada (só o painel funciona). Para abrir o painel na rede, troque `ADDR` para `:8080` e rode
+`ArendCalls.exe install` de novo: ele libera no firewall a porta do painel e a faixa UDP
+`50000-50100` da mídia WebRTC (e fecha as duas ao voltar para `127.0.0.1`).
+
+**Login do painel** (obrigatório se o painel ficar acessível pela internet). Num Prompt
+de Comando na pasta do programa:
+```bat
+arendcalls-server.exe -hash-password
+```
+Copie o hash para `ADMIN_PASSWORD_HASH=` e defina `ADMIN_USER=admin` no `.env` (sem
+aspas; o `.env` é lido literalmente, os `$` do hash não precisam de escape).
+
+**Atualizar.** Menu do ícone → *Encerrar tudo*, extraia a versão nova por cima da pasta
+(o Explorer pede administrador) e dê duplo clique no `ArendCalls.exe`. Se a pasta mudou de lugar, o ícone avisa e oferece
+apontar o serviço para a pasta nova.
+
+**Linha de comando** (pedem administrador sozinhos):
+`ArendCalls.exe install | uninstall | start | stop | restart | encerrar`.
+Para desinstalar, use o `desinstalar.bat`; `.env`, banco e gravações ficam na pasta.
+O log do ícone e da instalação fica em `%LOCALAPPDATA%\ArendCalls\lancador.log`.
+
+> [!NOTE]
+> **Vindo do NSSM ou do `iniciar.bat`?** O serviço novo também se chama `ArendCalls`.
+> Remova o antigo antes (`nssm stop ArendCalls` e `nssm remove ArendCalls confirm`, como
+> administrador) ou feche a janela do `iniciar.bat`. Leve o `wacalls.db` (e a pasta
+> `recordings`, se houver) para a pasta nova e passe as variáveis do
+> `AppEnvironmentExtra` para o `.env`. Extraído por cima da pasta antiga, o
+> `ArendCalls.exe` substitui o `arendcalls.exe` (o Windows ignora maiúsculas).
+
+Para compilar a partir do código (Linux ou Windows com Go):
+```bash
+GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o arendcalls-server.exe ./cmd/server
+packaging/windows/build.sh dev ArendCalls.exe
+```
 
 Para HTTPS, use o [Cloudflare Tunnel](#cloudflare-tunnel) (abaixo) ou um proxy reverso na frente (IIS com ARR, Caddy ou Traefik). No
 painel de métricas, o *load average* aparece zerado: o Windows não tem essa métrica.
@@ -255,10 +283,9 @@ atrás de NAT/CGNAT.
 
 **Pré-requisito:** um domínio adicionado à sua conta Cloudflare (plano gratuito serve).
 
-1. **Suba o ArendCalls** (duplo clique no `arendcalls.exe` ou serviço NSSM acima) e
-   confirme que o painel abre em `http://localhost:8080`. Com o tunnel, prefira
-   `-addr 127.0.0.1:8080` (no `nssm install`, no lugar de `-addr :8080`): o painel deixa
-   de ser acessível direto pela rede, só pelo tunnel.
+1. **Suba o ArendCalls** ([serviço + bandeja](#windows) acima) e confirme que o painel
+   abre em `http://localhost:8080`. Com o tunnel, mantenha `ADDR=127.0.0.1:8080` no
+   `.env` (o padrão): o painel deixa de ser acessível direto pela rede, só pelo tunnel.
 2. **Instale o `cloudflared`** (PowerShell):
    ```powershell
    winget install --id Cloudflare.cloudflared
@@ -272,17 +299,17 @@ atrás de NAT/CGNAT.
    sobe sozinho com o computador.
 4. **Publique o painel:** no tunnel, aba **Routes → Add route → Published application**.
    Escolha o subdomínio e o domínio, e em **Service URL** informe `http://localhost:8080`.
-5. **Ligue o login do painel** (passo 5 do serviço NSSM acima). O painel passa a estar na
+5. **Ligue o login do painel** ([Login do painel](#windows) acima). O painel passa a estar na
    internet: sem `ADMIN_PASSWORD_HASH`, qualquer pessoa com o endereço tem acesso total.
 6. **Troque o áudio para WebSocket** em cada navegador que for atender: **Configurações
    do Painel → Transporte de áudio → WebSocket**. O tunnel não transporta UDP, então o
    WebRTC não conecta por ele.
 
-Pronto: abra `https://calls.seudominio.com`. Com o tunnel, as regras de firewall do
-passo 3 do serviço deixam de ser necessárias (TCP 8080 e UDP 50000-50100).
+Pronto: abra `https://calls.seudominio.com`. Com o tunnel, não é preciso liberar nada
+no firewall (TCP 8080 e UDP 50000-50100).
 
 O bloqueio de tentativas de login usa o IP do cabeçalho `CF-Connecting-IP`. Com
-`-addr 127.0.0.1:8080` só o `cloudflared` alcança o ArendCalls, então esse cabeçalho só
+`ADDR=127.0.0.1:8080` só o `cloudflared` alcança o ArendCalls, então esse cabeçalho só
 pode vir da Cloudflare. Escutando em todas as interfaces (`:8080`), alguém na rede local
 pode forjá-lo.
 
