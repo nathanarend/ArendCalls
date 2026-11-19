@@ -234,18 +234,34 @@ reinicia/para o servidor, abre o `.env` no Bloco de Notas, mostra os logs e tem
 sobe tudo de novo).
 
 **Configurar.** Menu do ícone → *Editar configuração (.env)* (abre o Bloco de Notas como
-administrador), salve e use *Reiniciar servidor*. Com `API_KEY` vazia ou ainda
-`troque_esta_chave`, o serviço sobe com a API por chave desligada (só o painel funciona). Para abrir o painel na rede, troque `ADDR` para `:8080` e rode
-`ArendCalls.exe install` de novo: ele libera no firewall a porta do painel e a faixa UDP
-`50000-50100` da mídia WebRTC (e fecha as duas ao voltar para `127.0.0.1`).
+administrador), salve e use *Reiniciar servidor*. Edite sempre por esse menu: abrir o
+`.env` por outro caminho pode salvar uma cópia que o serviço não lê.
 
-**Login do painel** (obrigatório se o painel ficar acessível pela internet). Num Prompt
-de Comando na pasta do programa:
-```bat
-arendcalls-server.exe -hash-password
-```
-Copie o hash para `ADMIN_PASSWORD_HASH=` e defina `ADMIN_USER=admin` no `.env` (sem
-aspas; o `.env` é lido literalmente, os `$` do hash não precisam de escape).
+> [!IMPORTANT]
+> Linha que começa com `#` é **comentário** e é ignorada. Várias opções vêm comentadas
+> no `.env` (login do painel, `RECORDING_CONFIG_KEY`...). Para ligar uma, **apague o
+> `# ` do começo da linha**: `# ADMIN_USER=admin` → `ADMIN_USER=admin`. Formato:
+> `CHAVE=valor`, sem aspas.
+
+- `API_KEY`: chave da API; quem integra (ex.: Mocho) usa a mesma. Vazia ou ainda
+  `troque_esta_chave`, o serviço sobe com a API por chave desligada (só o painel funciona).
+- `ADDR`: para abrir o painel na rede, troque para `:8080` e rode `ArendCalls.exe install`
+  de novo: ele libera no firewall a porta do painel e a faixa UDP `50000-50100` da mídia
+  WebRTC (e fecha as duas ao voltar para `127.0.0.1`).
+- `RECORDING_CONFIG_KEY`: **uma** chave para o servidor inteiro, não por sessão. Cada
+  sessão tem sua configuração de gravação no painel; esta chave cifra no `wacalls.db` os
+  segredos de todas (B2, webhook, agente). Depois de usar, não perca nem troque: o que foi
+  cifrado com ela deixa de abrir.
+
+**Login do painel** (obrigatório se o painel ficar acessível pela internet):
+1. Num Prompt de Comando na pasta do programa:
+   ```bat
+   arendcalls-server.exe -hash-password
+   ```
+2. Cole o hash (60 caracteres, começa com `$2a$12$`) em `ADMIN_PASSWORD_HASH=`, sem aspas
+   (o `.env` é lido literalmente, os `$` não precisam de escape).
+3. **Apague o `# `** das linhas `ADMIN_USER` e `ADMIN_PASSWORD_HASH`.
+4. *Reiniciar servidor*. No `logs\servidor.log` deve aparecer `panel login enabled`.
 
 **Atualizar.** Menu do ícone → *Encerrar tudo*, extraia a versão nova por cima da pasta
 (o Explorer pede administrador) e dê duplo clique no `ArendCalls.exe`. Se a pasta mudou de lugar, o ícone avisa e oferece

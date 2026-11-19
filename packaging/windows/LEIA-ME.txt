@@ -20,16 +20,34 @@ INSTALAR
 
 CONFIGURAR (.env)
   Clique direito no icone > Editar configuracao (.env) (abre o Bloco de Notas
-  como administrador). Salve e use "Reiniciar servidor" para aplicar. Com a
-  API_KEY vazia ou "troque_esta_chave", a API por chave fica desligada.
-    ADDR=127.0.0.1:8080   so neste computador (use com Cloudflare Tunnel)
-    ADDR=:8080            aberto na rede. Depois de mudar o ADDR, rode
-                          "ArendCalls.exe install" de novo: ele libera (ou fecha)
-                          a porta e as chamadas WebRTC (UDP 50000-50100) no firewall.
+  como administrador). Edite SEMPRE por esse menu: abrir o .env por outro
+  caminho pode salvar uma copia que o servico nao le.
+
+  Regras do arquivo:
+    - CHAVE=valor, uma por linha, sem aspas.
+    - Linha que comeca com # e ignorada. Para ligar uma opcao que vem
+      comentada, APAGUE O "# " DO COMECO:
+        # ADMIN_USER=admin    <- desligada
+        ADMIN_USER=admin      <- ligada
+    - Salve e use "Reiniciar servidor". Confira em logs\servidor.log.
+
+  API_KEY       chave da API (Mocho e outros sistemas usam a MESMA). Longa e
+                aleatoria. Vazia ou "troque_esta_chave" = API por chave desligada.
+  ADDR=127.0.0.1:8080   so neste computador (use com Cloudflare Tunnel)
+  ADDR=:8080            aberto na rede. Depois de mudar o ADDR, rode
+                        "ArendCalls.exe install" de novo: ele libera (ou fecha)
+                        a porta e as chamadas WebRTC (UDP 50000-50100) no firewall.
+
   Login do painel (obrigatorio se o painel ficar acessivel pela internet):
-    abra o Prompt de Comando (nao precisa ser administrador) nesta pasta e rode
-      arendcalls-server.exe -hash-password
-    copie o hash para ADMIN_PASSWORD_HASH= e defina ADMIN_USER=admin no .env.
+    1. Prompt de Comando nesta pasta (nao precisa ser administrador):
+         arendcalls-server.exe -hash-password
+    2. Cole o hash (60 caracteres, comeca com $2a$12$) em ADMIN_PASSWORD_HASH=
+    3. Apague o "# " das linhas ADMIN_USER e ADMIN_PASSWORD_HASH.
+    4. Reiniciar servidor. No log deve aparecer "panel login enabled".
+
+  RECORDING_CONFIG_KEY: uma chave para o servidor inteiro (nao e por sessao)
+    que cifra no banco os segredos de gravacao/webhook/agente de todas as
+    sessoes. Opcional. Depois de usar, nao perca nem troque.
 
 ICONE DA BANDEJA
   Clique esquerdo: abre o painel no navegador.
