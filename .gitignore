@@ -1,4 +1,6 @@
-/docs
+/docs/*
+!/docs/screenshots/
+!/docs/screenshots/*.png
 /plano.md
 /skills-usado.md
 /task.md
